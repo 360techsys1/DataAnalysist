@@ -13,11 +13,16 @@ import {
   extractTableFromSql
 } from '../src/llm.js';
 
-export default async function handler(req, res) {
-  // Handle CORS
+// Helper function to set CORS headers
+function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+async function handleRequest(req, res) {
+  // Handle CORS - Set headers first, before anything else
+  setCorsHeaders(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -262,11 +267,27 @@ If yes, please confirm and I'll fetch that data for you. If not, feel free to re
 
   } catch (error) {
     console.error('Chat endpoint error:', error);
+    // Ensure CORS headers are set even on error
+    setCorsHeaders(res);
     res.status(500).json({
       error: 'An unexpected error occurred',
       message: `I encountered an unexpected error while processing your request. Please try again in a moment.
 
 If the problem persists, try rephrasing your question or breaking it into smaller parts.`
+    });
+  }
+}
+
+export default async function handler(req, res) {
+  try {
+    setCorsHeaders(res);
+    await handleRequest(req, res);
+  } catch (error) {
+    console.error('Handler wrapper error:', error);
+    setCorsHeaders(res);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'An unexpected error occurred'
     });
   }
 }
