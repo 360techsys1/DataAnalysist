@@ -82,6 +82,7 @@ How can I help you analyze your business data today?`
         });
 
       // Call backend API
+      // No timeout - allow long responses for Ollama (can take up to 60 seconds)
       const response = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
         headers: {
@@ -91,6 +92,7 @@ How can I help you analyze your business data today?`
           question: userMessage,
           history: history,
         }),
+        // No signal/timeout - allow backend to handle timing (up to 60s on Vercel)
       });
 
       const data = await response.json();

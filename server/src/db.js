@@ -30,7 +30,7 @@ const dbConfig = {
     min: 0,
     idleTimeoutMillis: 30000
   },
-  requestTimeout: 30000,
+  requestTimeout: 55000, // Increased to allow for longer Ollama responses (Vercel limit is 60s)
 };
 
 let pool = null;

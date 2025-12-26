@@ -55,12 +55,14 @@ async function callOllama(messages, options = {}) {
     requestBody.system = systemPrompt;
   }
 
+  // Ollama can take longer than OpenAI - no timeout set, allows up to Vercel's 60s limit
   const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(requestBody),
+    // No timeout - let Ollama take its time (up to Vercel function limit of 60s)
   });
 
   if (!response.ok) {
