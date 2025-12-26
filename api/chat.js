@@ -1,5 +1,5 @@
 // Vercel serverless function for chat endpoint
-import { runQuery } from '../../server/src/db.js';
+import { runQuery } from '../server/src/db.js';
 import { 
   generateSqlFromQuestion, 
   answerFromData,
@@ -10,7 +10,7 @@ import {
   isMetadataQuestion,
   handleMetadataQuestion,
   extractTableFromSql
-} from '../../server/src/llm.js';
+} from '../server/src/llm.js';
 
 export default async function handler(req, res) {
   // Handle CORS

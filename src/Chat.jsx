@@ -5,7 +5,8 @@ import remarkGfm from 'remark-gfm';
 import { FiSend, FiDatabase } from 'react-icons/fi';
 import './chat.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+// Use relative URL for Vercel deployment, or env var for custom backend
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:4000');
 
 const isGreeting = (input) => {
   return /^(hi|hello|hey|greetings?|good\s(morning|afternoon|evening))/i.test(input.trim());
