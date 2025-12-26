@@ -124,6 +124,61 @@ If yes, please confirm and I'll fetch that data for you. If not, feel free to re
       console.log(`✅ Query executed successfully. Returned ${rowCount} rows`);
     } catch (error) {
       console.error('❌ Query execution error:', error);
+      
+      // Check for SQL syntax errors (ORDER BY in CTE, etc.)
+      const hasSqlSyntaxError = error.message.includes('ORDER BY') || 
+                                 error.message.includes('syntax') || 
+                                 error.message.includes('invalid') ||
+                                 error.originalError?.message?.includes('ORDER BY');
+      
+      // If SQL syntax error, provide helpful suggestions for complex queries
+      if (hasSqlSyntaxError) {
+        const errorDetail = error.originalError?.message || error.message;
+        const isOrderByError = errorDetail.includes('ORDER BY');
+        
+        let suggestionMessage = `I encountered a SQL syntax error while generating the query. This usually happens with complex queries that need ranking/sorting.
+
+**The issue:** ${isOrderByError ? 'ORDER BY cannot be used in CTEs (Common Table Expressions) without TOP/OFFSET in SQL Server' : 'SQL syntax error in generated query'}`;
+
+        // Check if the question was about top distributors/products
+        if (/top.*distribut.*product|distribut.*top.*product|hero product/i.test(question)) {
+          suggestionMessage += `
+
+**For questions like "top X distributors and their top Y products", try these clearer versions:**
+
+1. "Show me the top 3 distributors by total sales, and for each distributor, show their top 2 best-selling products"
+2. "What are the top 3 distributors by sales amount, and what are their top 2 products by sales?"
+3. "List top 3 distributors with their highest selling products - show 2 products per distributor"
+
+**Tips for better questions:**
+• Be specific: "by sales amount" or "by quantity" instead of just "top"
+• Use "for each" or "per distributor" to clarify grouping
+• Specify the ranking criteria clearly`;
+        } else {
+          suggestionMessage += `
+
+**Here's how to improve your question:**
+
+**Tips:**
+• Break complex questions into simpler parts
+• Be specific about what "top" means (by sales amount, by quantity, by count)
+• Specify time periods clearly (e.g., "last 3 months", "2024")
+• Use clear grouping phrases like "for each" or "per"
+
+**Example improvements:**
+• Instead of: "top distributors and products"
+• Try: "Show me top 10 distributors by total sales amount"`;
+        }
+        
+        return res.json({
+          answer: suggestionMessage,
+          rowCount: 0,
+          type: 'error_with_suggestions',
+          sqlError: error.message
+        });
+      }
+      
+      // Generic database error
       return res.status(500).json({
         error: 'Database query failed',
         message: `I couldn't retrieve the data you requested. This might be because:

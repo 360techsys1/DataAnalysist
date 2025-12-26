@@ -24,6 +24,8 @@ export function isConversationalMessage(message, history = []) {
     /^(that's|that is|this is|it's|it is) (crazy|cool|nice|great|awesome|amazing|interesting)/i,
     /^(ok|okay|alright|sure|yeah|yes|no|nope)(\s|$)/i,
     /^(i (think|believe|guess)|sounds good|makes sense)/i,
+    /(do you have|can you give|tell me|what are|how can|how should).*(suggest|tip|advice|help|improve|better|correct)/i,
+    /(suggest|suggestion|tip|advice|help|improve|better way|correct way|how to ask)/i,
   ];
   
   // Check explicit patterns first
@@ -442,6 +444,21 @@ CRITICAL RULES:
 17. "year to year" or "year-over-year" means compare totals by year
 18. If question doesn't specify primary/secondary, default to FACT_SALES_ORDER (primary sales)
 19. NEVER use old years (like 2023) for "last month" or "last 3 months" - always use ${currentYear} for current period
+20. **CRITICAL SQL SERVER LIMITATION - ORDER BY IN CTEs**: 
+   - WRONG: WITH MyCTE AS (SELECT col FROM table ORDER BY col) -- THIS WILL FAIL! ORDER BY alone is not allowed in CTEs.
+   - WRONG: WITH MyCTE AS (SELECT col, SUM(amount) FROM table GROUP BY col ORDER BY SUM(amount)) -- THIS WILL FAIL!
+   - CORRECT: WITH MyCTE AS (SELECT TOP 3 col FROM table ORDER BY col) -- ORDER BY is allowed WITH TOP
+   - CORRECT: WITH MyCTE AS (SELECT col, ROW_NUMBER() OVER (ORDER BY col) AS rn FROM table) -- ORDER BY inside window function is allowed
+   - CORRECT: WITH MyCTE AS (SELECT col FROM table), Final AS (SELECT * FROM MyCTE ORDER BY col) -- ORDER BY in final SELECT is allowed
+   
+21. For ranking/sorting in CTEs: 
+   - If you need to rank/sort in a CTE, use ROW_NUMBER() window function: ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...) 
+   - ORDER BY inside OVER() clause is allowed, but ORDER BY at CTE level without TOP is NOT allowed
+   - Filter rankings in final SELECT: WHERE rn <= N
+   
+22. **NEVER write ORDER BY at CTE level without TOP**: 
+   - WRONG: WITH CTE AS (SELECT col FROM table GROUP BY col ORDER BY SUM(amount)) 
+   - CORRECT: WITH CTE AS (SELECT col, SUM(amount) AS total FROM table GROUP BY col), Final AS (SELECT * FROM CTE ORDER BY total)
 
 ${schemaDescription}
 
@@ -488,6 +505,40 @@ FROM FACT_SALES_ORDER f
 INNER JOIN DIMDISTRIBUTION_LOCATION dl ON f.DIST_LOCKEY = dl.DIST_LOCKEY
 GROUP BY dl.REGION
 ORDER BY TotalSales DESC
+
+7. Top distributors with their top products (CORRECT - using ROW_NUMBER, NO ORDER BY in CTEs):
+WITH DistributorSales AS (
+    SELECT TOP 3
+        d.DISTKEY,
+        d.NAME,
+        SUM(f.NET_AMOUNT) AS TotalSales
+    FROM FACT_SALES_ORDER f
+    INNER JOIN DIMDISTRIBUTION_MASTER d ON f.DISTKEY = d.DISTKEY
+    GROUP BY d.DISTKEY, d.NAME
+),
+TopDistributors AS (
+    SELECT DISTKEY, NAME, TotalSales
+    FROM DistributorSales
+),
+ProductRanked AS (
+    SELECT
+        f.DISTKEY,
+        p.PRODUCTDESCRIPTION,
+        SUM(f.NET_AMOUNT) AS ProductSales,
+        ROW_NUMBER() OVER (PARTITION BY f.DISTKEY ORDER BY SUM(f.NET_AMOUNT) DESC) AS Rank
+    FROM FACT_SALES_ORDER f
+    INNER JOIN DIMPRODUCT p ON f.PRODUCTKEY = p.PRODUCTKEY
+    WHERE f.DISTKEY IN (SELECT DISTKEY FROM TopDistributors)
+    GROUP BY f.DISTKEY, p.PRODUCTDESCRIPTION
+)
+SELECT
+    td.NAME AS DistributorName,
+    pr.PRODUCTDESCRIPTION AS ProductName,
+    pr.ProductSales AS Sales
+FROM TopDistributors td
+INNER JOIN ProductRanked pr ON td.DISTKEY = pr.DISTKEY
+WHERE pr.Rank <= 2
+ORDER BY td.TotalSales DESC, pr.ProductSales DESC
 
 Remember:
 - "primary sales" or "company sales" = FACT_SALES_ORDER
