@@ -1,12 +1,8 @@
-import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { schemaDescription } from './schemaConfig.js';
+import { callLLM } from './llmProvider.js';
 
 dotenv.config();
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 // Detect if message is conversational (not a data query)
 export function isConversationalMessage(message, history = []) {
@@ -176,17 +172,15 @@ ${lastSql ? `Previous SQL used: ${lastSql.substring(0, 200)}...` : ''}
 Explain what data source was used in the previous answer.`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: contextPrompt }
-      ],
+    const response = await callLLM([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: contextPrompt }
+    ], {
       temperature: 0.7,
       max_tokens: 200,
     });
 
-    return completion.choices[0].message.content;
+    return response.content;
   } catch (error) {
     console.error('Error handling metadata question:', error);
     return 'I used data from our sales database. Could you clarify what specific information you\'d like to know about the data source?';
@@ -268,19 +262,17 @@ Keep responses brief (1-2 sentences) and professional.`;
     : `User says: "${message}"\n\nRespond conversationally and helpfully.`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
+    const response = await callLLM([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ], {
       temperature: 0.7,
       max_tokens: 150,
     });
 
-    return completion.choices[0].message.content;
+    return response.content;
   } catch (error) {
-    console.error('OpenAI API error (conversational):', error);
+    console.error('LLM API error (conversational):', error);
     return "I'm here to help! Feel free to ask me any questions about your sales, distributors, or products.";
   }
 }
@@ -351,17 +343,15 @@ Suggest a clearer, more specific rephrased version of this question that would w
 Return ONLY the rephrased question, nothing else.`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
+    const response = await callLLM([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ], {
       temperature: 0.7,
       max_tokens: 200,
     });
 
-    return completion.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+    return response.content.trim().replace(/^["']|["']$/g, '');
   } catch (error) {
     console.error('Error generating rephrased question:', error);
     return null;
@@ -565,14 +555,12 @@ Now generate SQL for: "${question}"`;
   ];
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4',
-      messages: messages,
+    const response = await callLLM(messages, {
       temperature: 0.2, // Lower temperature for more consistent SQL
       max_tokens: 1500, // Increased for complex queries with CTEs
     });
 
-    let sql = completion.choices[0].message.content.trim();
+    let sql = response.content.trim();
     
     // Clean up SQL (remove markdown code blocks if present)
     sql = sql.replace(/```sql\n?/gi, '').replace(/```\n?/g, '').trim();
@@ -595,7 +583,7 @@ Now generate SQL for: "${question}"`;
     
     return sql;
   } catch (error) {
-    console.error('OpenAI API error:', error);
+    console.error('LLM API error:', error);
     if (error.message === 'SQL_SAFETY_CHECK_FAILED') {
       throw error; // Re-throw to be handled specifically
     }
@@ -660,19 +648,17 @@ ${JSON.stringify(rows, null, 2)}
 Generate a well-formatted, professional business response with zero hallucinations. Only use the data provided above. If the result set is empty, explain why and suggest how to refine the question. Always mention whether this is Primary Sales or Secondary Sales data.`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ],
+    const response = await callLLM([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ], {
       temperature: 0.7,
       max_tokens: 2500,
     });
 
-    return completion.choices[0].message.content;
+    return response.content;
   } catch (error) {
-    console.error('OpenAI API error:', error);
+    console.error('LLM API error:', error);
     throw new Error(`Failed to generate answer: ${error.message}`);
   }
 }

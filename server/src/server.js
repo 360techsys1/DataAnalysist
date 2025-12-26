@@ -13,8 +13,24 @@ app.use(cors());
 app.use(express.json());
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Hilal Foods API Server' });
+app.get('/health', async (req, res) => {
+  try {
+    await testConnection();
+    const { getLLMProviderInfo } = await import('./llmProvider.js');
+    const llmInfo = getLLMProviderInfo();
+    res.json({ 
+      status: 'ok', 
+      message: 'Hilal Foods API Server',
+      database: 'connected',
+      llm: llmInfo
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'error', 
+      database: 'disconnected',
+      message: error.message 
+    });
+  }
 });
 
 // Chat endpoint
