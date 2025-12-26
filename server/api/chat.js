@@ -74,6 +74,28 @@ async function handleRequest(req, res) {
     try {
       sql = await generateSqlFromQuestion(question, history);
     } catch (error) {
+      // Check for Ollama timeout errors
+      if (error.message && error.message.includes('timeout')) {
+        console.error('❌ Ollama timeout error:', error.message);
+        return res.status(504).json({
+          error: 'Request timeout',
+          message: `⏱️ **Ollama Server Timeout**
+
+Your self-hosted Ollama server took too long to respond (over 55 seconds). This usually happens when:
+
+• Ollama server is slow or overloaded
+• The model is processing a complex request
+• Network latency between Vercel and your Ollama server
+
+**Try:**
+• Simplifying your question
+• Checking if your Ollama server is running properly
+• Waiting a moment and trying again
+• Using a faster model (if available)`,
+          type: 'timeout'
+        });
+      }
+      
       // Handle SQL generation/safety errors with intelligent rephrasing
       const errorType = error.message === 'SQL_SAFETY_CHECK_FAILED' ? 'SQL_SAFETY_CHECK_FAILED' : 'SQL_GENERATION_FAILED';
       console.error(`❌ ${errorType}:`, error.message);
@@ -246,6 +268,31 @@ If yes, please confirm and I'll fetch that data for you. If not, feel free to re
       answer = await answerFromData(question, rows, { sql, rowCount });
     } catch (error) {
       console.error('❌ Answer generation error:', error);
+      
+      // Check for Ollama timeout errors during answer generation
+      if (error.message && error.message.includes('timeout')) {
+        console.error('❌ Ollama timeout during answer generation:', error.message);
+        return res.status(504).json({
+          error: 'Request timeout',
+          message: `⏱️ **Ollama Server Timeout**
+
+Your self-hosted Ollama server took too long to format the response. However, I did retrieve the data successfully.
+
+**Query Results:** ${rowCount} records found.
+
+**Data:**\n\`\`\`json\n${JSON.stringify(rows.slice(0, 10), null, 2)}\n\`\`\`
+
+${rowCount > 10 ? `*(Showing first 10 of ${rowCount} results)*` : ''}
+
+**To fix timeout issues:**
+• Simplify your questions
+• Check if your Ollama server is running properly
+• Try using a faster model`,
+          rowCount,
+          type: 'timeout_with_data'
+        });
+      }
+      
       // Fallback: return data in simple format
       return res.json({
         answer: `## 📊 Query Results\n\nFound ${rowCount} records.\n\n**Data:**\n\`\`\`json\n${JSON.stringify(rows.slice(0, 10), null, 2)}\n\`\`\`\n\n${rowCount > 10 ? `*(Showing first 10 of ${rowCount} results)*` : ''}`,
@@ -269,6 +316,27 @@ If yes, please confirm and I'll fetch that data for you. If not, feel free to re
     console.error('Chat endpoint error:', error);
     // Ensure CORS headers are set even on error
     setCorsHeaders(res);
+    
+    // Check for timeout errors
+    if (error.message && error.message.includes('timeout')) {
+      return res.status(504).json({
+        error: 'Request timeout',
+        message: `⏱️ **Request Timeout**
+
+The request took too long to complete. This usually happens when:
+
+• Your Ollama server is slow or overloaded
+• Network latency is high
+• The question requires complex processing
+
+**Try:**
+• Simplifying your question
+• Checking if your Ollama server is accessible
+• Waiting a moment and trying again`,
+        type: 'timeout'
+      });
+    }
+    
     res.status(500).json({
       error: 'An unexpected error occurred',
       message: `I encountered an unexpected error while processing your request. Please try again in a moment.

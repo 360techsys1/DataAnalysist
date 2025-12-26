@@ -1,16 +1,18 @@
 .gradient-auth {
-  background: linear-gradient(120deg, #f6d365, #fda085);
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 1rem;
 }
 .auth-card {
   background: white;
-  padding: 2rem;
+  padding: 2.5rem;
   border-radius: 1rem;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-  width: 360px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+  width: 100%;
+  max-width: 400px;
   text-align: center;
 }
 .auth-card h1 {
@@ -27,10 +29,29 @@
   color: #4a5568;
 }
 .auth-group input {
-  width: 93%;
+  width: 100%;
   padding: 0.75rem;
+  padding-left: 2.5rem;
   border: 1px solid #cbd5e0;
   border-radius: 0.5rem;
+  font-size: 1rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.password-group input {
+  padding-right: 3rem;
+}
+
+.auth-group input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.auth-group input:disabled {
+  background-color: #f7fafc;
+  cursor: not-allowed;
 }
 .password-group {
   position: relative;
@@ -46,12 +67,25 @@
 }
 .btn-login {
   width: 100%;
-  padding: 0.75rem;
-  background: #667eea;
+  padding: 0.875rem;
+  background: #2563eb;
   color: white;
   border: none;
   border-radius: 0.5rem;
   margin-top: 0.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.btn-login:hover:not(:disabled) {
+  background: #1e40af;
+  transform: translateY(-1px);
+}
+
+.btn-login:active:not(:disabled) {
+  transform: translateY(0);
 }
 .btn-login .spin {
   animation: spin 1s linear infinite;

@@ -55,36 +55,52 @@ async function callOllama(messages, options = {}) {
     requestBody.system = systemPrompt;
   }
 
-  // Ollama can take longer than OpenAI - no timeout set, allows up to Vercel's 60s limit
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-    // No timeout - let Ollama take its time (up to Vercel function limit of 60s)
-  });
+  // Add timeout to prevent hanging - 55 seconds to stay under Vercel's 60s limit
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 55000); // 55 seconds
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Ollama API error (${response.status}): ${errorText}`);
+  try {
+    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal, // Add timeout signal
+    });
+
+    clearTimeout(timeoutId); // Clear timeout if request completes successfully
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Ollama API error (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    
+    if (!data.message || !data.message.content) {
+      throw new Error('Invalid response from Ollama API');
+    }
+
+    return {
+      content: data.message.content,
+      model: data.model,
+      usage: data.eval_count ? {
+        total_tokens: data.eval_count + data.prompt_eval_count,
+        prompt_tokens: data.prompt_eval_count,
+        completion_tokens: data.eval_count,
+      } : null,
+    };
+  } catch (error) {
+    clearTimeout(timeoutId); // Ensure timeout is cleared
+    
+    if (error.name === 'AbortError') {
+      throw new Error('Ollama request timeout: Your self-hosted Ollama server took too long to respond (over 55 seconds). Please check if Ollama is running and try again.');
+    }
+    
+    // Re-throw other errors
+    throw error;
   }
-
-  const data = await response.json();
-  
-  if (!data.message || !data.message.content) {
-    throw new Error('Invalid response from Ollama API');
-  }
-
-  return {
-    content: data.message.content,
-    model: data.model,
-    usage: data.eval_count ? {
-      total_tokens: data.eval_count + data.prompt_eval_count,
-      prompt_tokens: data.prompt_eval_count,
-      completion_tokens: data.eval_count,
-    } : null,
-  };
 }
 
 // OpenAI API call helper

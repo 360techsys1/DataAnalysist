@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { FiSend, FiDatabase } from 'react-icons/fi';
+import { FiSend, FiDatabase, FiLogOut } from 'react-icons/fi';
 import './chat.css';
 
 // Use relative URL for Vercel deployment, or env var for custom backend
@@ -12,7 +12,7 @@ const isGreeting = (input) => {
   return /^(hi|hello|hey|greetings?|good\s(morning|afternoon|evening))/i.test(input.trim());
 };
 
-export default function Chat() {
+export default function Chat({ onLogout }) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -81,19 +81,31 @@ How can I help you analyze your business data today?`
           return historyItem;
         });
 
-      // Call backend API
-      // No timeout - allow long responses for Ollama (can take up to 60 seconds)
-      const response = await fetch(`${API_BASE_URL}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          question: userMessage,
-          history: history,
-        }),
-        // No signal/timeout - allow backend to handle timing (up to 60s on Vercel)
-      });
+      // Call backend API with timeout (65 seconds to account for network overhead)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 65000); // 65 seconds
+      
+      let response;
+      try {
+        response = await fetch(`${API_BASE_URL}/api/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            question: userMessage,
+            history: history,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Request timeout: The server took too long to respond. This may happen if your Ollama server is slow. Please try again or check your Ollama server connection.');
+        }
+        throw fetchError;
+      }
 
       const data = await response.json();
 
@@ -132,13 +144,21 @@ How can I help you analyze your business data today?`
     } catch (error) {
       console.error('Error:', error);
       
-      // Network or other errors
-      const errorMessage = error.message || 'I encountered an error. Please check your connection and try again.';
+      // Network or other errors - provide more helpful error messages
+      let errorMessage = error.message || 'I encountered an error. Please check your connection and try again.';
+      let userFriendlyMessage = errorMessage;
+      
+      if (error.message && error.message.includes('timeout')) {
+        userFriendlyMessage = `⏱️ **Request Timeout**\n\nThe request took too long to complete. This usually happens when:\n\n• Your Ollama server is slow or overloaded\n• The network connection is unstable\n• The question requires complex processing\n\n**Try:**\n• Simplifying your question\n• Checking if your Ollama server is running properly\n• Waiting a moment and trying again`;
+      } else if (error.message && (error.message.includes('fetch') || error.message.includes('network'))) {
+        userFriendlyMessage = `🔌 **Connection Error**\n\nUnable to connect to the server. Please check:\n\n• Your internet connection\n• If the backend server is running\n• If your Ollama server is accessible (if using self-hosted)\n\nPlease try again.`;
+      }
+      
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `❌ **Connection Error**\n\n${errorMessage}\n\nPlease try again.`
+        content: userFriendlyMessage
       }]);
-      setError('Connection error. Please try again.');
+      setError(errorMessage.includes('timeout') ? 'Request timeout. Please try again.' : 'Connection error. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -159,8 +179,34 @@ How can I help you analyze your business data today?`
           <FiDatabase size={24} />
           <h1>Hilal Foods Data Analyst</h1>
         </div>
-        <div className="header-badge">
-          <span>SQL Server Connected</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div className="header-badge">
+            <span>SQL Server Connected</span>
+          </div>
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              style={{
+                background: 'rgba(255, 255, 255, 0.2)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                color: 'white',
+                padding: '0.5rem 1rem',
+                borderRadius: '0.5rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                fontSize: '0.875rem',
+                fontWeight: '500',
+                transition: 'background 0.2s'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)'}
+              onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+            >
+              <FiLogOut />
+              Logout
+            </button>
+          )}
         </div>
       </header>
 
