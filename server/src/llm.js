@@ -81,6 +81,97 @@ export function extractTableFromSql(sql) {
   return 'unknown';
 }
 
+// Extract entities (distributors, products) from previous conversation results
+export function extractEntitiesFromHistory(history = []) {
+  const entities = {
+    distributors: [],
+    products: [],
+    timePeriod: null,
+    lastQueryType: null
+  };
+  
+  // Look at the last assistant message that had data
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    if (msg.role === 'assistant' && msg.content) {
+      const content = msg.content;
+      
+      // Try multiple patterns to extract distributor names
+      // Pattern 1: Numbered list with PKR (e.g., "1. PRESTIGE GROUP: PKR 468,670,997.09")
+      const numberedPattern = /\d+\.\s+([A-Z][A-Z\s&()\-.,]+?):\s*PKR/g;
+      let matches = content.match(numberedPattern);
+      if (matches && matches.length > 0) {
+        entities.distributors = matches.map(match => {
+          const name = match.replace(/^\d+\.\s+/, '').replace(/:\s*PKR.*$/, '').trim();
+          return name;
+        }).filter(name => name.length > 0 && name.length < 100); // Reasonable length filter
+        if (entities.distributors.length > 0) {
+          entities.lastQueryType = 'distributors';
+          break;
+        }
+      }
+      
+      // Pattern 2: Markdown bold with PKR (e.g., "**PRESTIGE GROUP**: PKR 468,670,997.09")
+      const markdownPattern = /\*\*([A-Z][A-Z\s&()\-.,]+?)\*\*:?\s*PKR/g;
+      matches = content.match(markdownPattern);
+      if (matches && matches.length > 0) {
+        entities.distributors = matches.map(match => {
+          const name = match.replace(/\*\*/g, '').replace(/:\s*PKR.*$/, '').trim();
+          return name;
+        }).filter(name => name.length > 0 && name.length < 100);
+        if (entities.distributors.length > 0) {
+          entities.lastQueryType = 'distributors';
+          break;
+        }
+      }
+      
+      // Pattern 3: Bullet points with PKR (e.g., "• **PRESTIGE GROUP**: PKR 468,670,997.09")
+      const bulletPattern = /[•\*]\s+\*\*([A-Z][A-Z\s&()\-.,]+?)\*\*:?\s*PKR/g;
+      matches = content.match(bulletPattern);
+      if (matches && matches.length > 0) {
+        entities.distributors = matches.map(match => {
+          const name = match.replace(/^[•\*]\s+\*\*/, '').replace(/\*\*:?\s*PKR.*$/, '').trim();
+          return name;
+        }).filter(name => name.length > 0 && name.length < 100);
+        if (entities.distributors.length > 0) {
+          entities.lastQueryType = 'distributors';
+          break;
+        }
+      }
+      
+      // Pattern 4: Table format or simple list
+      const tablePattern = /\|([A-Z][A-Z\s&()\-.,]+?)\|.*PKR/g;
+      matches = content.match(tablePattern);
+      if (matches && matches.length > 0) {
+        entities.distributors = matches.map(match => {
+          const name = match.replace(/^\|/, '').replace(/\|.*$/, '').trim();
+          return name;
+        }).filter(name => name.length > 0 && name.length < 100);
+        if (entities.distributors.length > 0) {
+          entities.lastQueryType = 'distributors';
+          break;
+        }
+      }
+    }
+  }
+  
+  return entities;
+}
+
+// Check if user is asking about previous results (e.g., "each of these distributors")
+export function isFollowUpQuestion(question, history = []) {
+  const lowerQuestion = question.toLowerCase();
+  
+  const followUpPatterns = [
+    /(each|every|all) of (these|those|the above|the previous|the last)/i,
+    /(these|those|the above|the previous|the last) (distributors?|products?|items?)/i,
+    /(for|of) (each|every) (of )?(these|those|the above|the previous|the last)/i,
+    /(best|top|worst) (selling|performing) (product|item) (of|for|in) (each|every) (of )?(these|those|the above)/i,
+  ];
+  
+  return followUpPatterns.some(pattern => pattern.test(question)) && history.length > 0;
+}
+
 // Handle metadata questions about previous queries
 export async function handleMetadataQuestion(question, history = [], lastSql = null, lastTable = null) {
   const lowerQuestion = question.toLowerCase();
@@ -312,33 +403,57 @@ export function isSqlSafe(sql) {
   return true;
 }
 
-// Intelligently rephrase user question when SQL generation fails
-export async function suggestRephrasedQuestion(originalQuestion, errorType = 'SQL_GENERATION_FAILED', history = []) {
-  const systemPrompt = `You are a helpful assistant that improves user questions for database queries. When a user's question fails to generate a proper SQL query, you should suggest a clearer, more specific version of their question.
+// Intelligently rephrase user question when SQL generation fails - CONTEXT-AWARE
+export async function suggestRephrasedQuestion(originalQuestion, errorType = 'SQL_GENERATION_FAILED', history = [], entities = null) {
+  // Build context from history
+  const recentContext = history.slice(-3).map(msg => {
+    if (msg.role === 'user') {
+      return `User asked: ${msg.content}`;
+    } else {
+      // Extract key info from assistant response
+      const content = msg.content.substring(0, 300);
+      return `Assistant responded: ${content}`;
+    }
+  }).join('\n\n');
+  
+  const entitiesContext = entities && entities.distributors.length > 0 
+    ? `\n\nIMPORTANT CONTEXT: The user previously asked about these distributors: ${entities.distributors.slice(0, 10).join(', ')}. When they say "each of these distributors" or "these distributors", they mean these specific ones.`
+    : '';
+  
+  const systemPrompt = `You are a helpful assistant that improves user questions for database queries. When a user's question fails to generate a proper SQL query, you should suggest a clearer, more specific version that maintains their intent.
+
+CRITICAL: Use the conversation context to understand what the user is referring to. If they mention "these distributors" or "each of these", they're referring to distributors from a previous query.
 
 Rules:
-1. Understand what the user is trying to ask
-2. Suggest a rephrased version that's clearer and more specific
-3. Keep the intent the same but make it more query-friendly
-4. Fix typos (like "oast" -> "past", "sles" -> "sales")
-5. Be friendly and helpful
-6. Return ONLY the suggested question, no explanations, no markdown
+1. Understand what the user is trying to ask based on conversation context
+2. If they mention "these distributors/products", suggest a question that explicitly references the context
+3. Suggest a rephrased version that's clearer and more specific
+4. Keep the intent the same but make it more query-friendly
+5. Fix typos (like "oast" -> "past", "sles" -> "sales")
+6. Be friendly and helpful
+7. Return ONLY the suggested question, no explanations, no markdown
 
 Examples:
+- User asked about "top 10 distributors" and now says "best product of each" -> "Show me the top 3 best-selling products for each of the top 10 distributors from the previous query"
 - "Show company year to year growth over the oast 3 years" -> "Show company year-over-year sales growth for the past 3 years (2022, 2023, 2024)"
 - "sales data" -> "Show me total sales by year for the last 3 years"
-- "top stuff" -> "Show me the top 10 distributors by total sales"
-- "is this was from primary sles or secondary sales?" -> "Was the previous data from primary sales or secondary sales?"`;
+- "top stuff" -> "Show me the top 10 distributors by total sales"`;
 
   const userPrompt = `The user asked: "${originalQuestion}"
 
-This question failed to generate a proper database query (${errorType}). 
+This question failed to generate a proper database query (${errorType}).${entitiesContext}
 
-Suggest a clearer, more specific rephrased version of this question that would work better for database queries. Focus on:
+Recent conversation context:
+${recentContext || 'No previous context'}
+
+Suggest a clearer, more specific rephrased version of this question that would work better for database queries. If the user is referring to previous results (like "these distributors"), make sure your suggestion explicitly references that context.
+
+Focus on:
 - Being specific about time periods
 - Clarifying what data they want (sales, distributors, products)
 - Using standard business terminology
 - Fixing any typos
+- If they mention "each of these", suggest a question that clearly references the previous results
 
 Return ONLY the rephrased question, nothing else.`;
 
@@ -545,11 +660,21 @@ Remember:
 
 Now generate SQL for: "${question}"`;
 
+  // Extract entities from history for better context
+  const entities = extractEntitiesFromHistory(history);
+  let contextEnhancement = '';
+  
+  if (entities.distributors.length > 0 && /(these|those|each|every|above|previous)/i.test(question)) {
+    contextEnhancement = `\n\nIMPORTANT CONTEXT: The user previously asked about these distributors: ${entities.distributors.slice(0, 10).join(', ')}. When they say "each of these distributors" or "these distributors", they mean these specific distributors. You should filter by these distributor names in your query.`;
+  }
+  
   const messages = [
-    { role: 'system', content: systemPrompt },
+    { role: 'system', content: systemPrompt + contextEnhancement },
     ...history.slice(-4).map(msg => ({
       role: msg.role === 'user' ? 'user' : 'assistant',
-      content: msg.role === 'user' ? `Previous question: ${msg.content}` : `Previous context: ${msg.content.substring(0, 300)}`
+      content: msg.role === 'user' 
+        ? `Previous question: ${msg.content}` 
+        : `Previous response summary: ${msg.content.substring(0, 500)}${msg.sql ? `\n\nPrevious SQL used: ${msg.sql.substring(0, 200)}` : ''}`
     })),
     { role: 'user', content: question }
   ];
@@ -642,10 +767,22 @@ Query returned ${rowCount} rows.${sourceNote}`;
 
   const userMessage = `Question: ${question}
 
-Query Results (JSON):
-${JSON.stringify(rows, null, 2)}
+Query Results (${rowCount} rows):
+${JSON.stringify(rows.slice(0, 100), null, 2)}${rowCount > 100 ? '\n\n(Showing first 100 rows of results for processing)' : ''}
 
-Generate a well-formatted, professional business response with zero hallucinations. Only use the data provided above. If the result set is empty, explain why and suggest how to refine the question. Always mention whether this is Primary Sales or Secondary Sales data.`;
+CRITICAL INSTRUCTIONS:
+1. NEVER show raw JSON data to the user - format everything in natural, readable language
+2. Format ALL data in natural, readable language using markdown
+3. Use markdown formatting (headings, bullet points, tables, bold text)
+4. Present numbers with proper formatting (commas, currency symbols like PKR)
+5. Group related data logically (e.g., by distributor, by product, by time period)
+6. If there are many rows, summarize key insights and show top/bottom performers
+7. Always mention whether this is Primary Sales or Secondary Sales data
+8. Make it conversational and easy to understand for non-technical users
+9. Use emojis and icons for visual appeal (📊 📈 💰 🏆 📍)
+10. Present data in lists, tables, or structured paragraphs - NEVER as code blocks or JSON
+
+Generate a well-formatted, professional business response. Only use the data provided above. Format it beautifully in natural language - never show JSON or code blocks with raw data.`;
 
   try {
     const response = await callLLM([

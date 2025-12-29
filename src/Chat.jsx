@@ -2,8 +2,61 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { FiSend, FiDatabase, FiLogOut } from 'react-icons/fi';
+import { FiSend, FiDatabase, FiLogOut, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import './chat.css';
+
+// SQL Viewer Component - Collapsible
+function SQLViewer({ sql }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  return (
+    <div style={{ 
+      marginTop: '1rem', 
+      border: '1px solid #e5e7eb', 
+      borderRadius: '0.5rem',
+      overflow: 'hidden'
+    }}>
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        style={{
+          width: '100%',
+          padding: '0.75rem',
+          background: '#f9fafb',
+          border: 'none',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '0.875rem',
+          fontWeight: '500',
+          color: '#374151'
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <FiDatabase size={16} />
+          View SQL Query
+        </span>
+        {isExpanded ? <FiChevronUp size={16} /> : <FiChevronDown size={16} />}
+      </button>
+      {isExpanded && (
+        <div style={{ 
+          padding: '1rem', 
+          background: '#1f2937', 
+          color: '#f3f4f6',
+          fontFamily: 'monospace',
+          fontSize: '0.875rem',
+          overflowX: 'auto',
+          maxHeight: '400px',
+          overflowY: 'auto'
+        }}>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {sql}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Use relative URL for Vercel deployment, or env var for custom backend
 const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:4000');
@@ -128,8 +181,10 @@ How can I help you analyze your business data today?`
         setMessages(prev => [...prev, { 
           role: 'assistant', 
           content: data.answer,
-          suggestedQuestion: data.suggestedQuestion
+          suggestedQuestion: data.suggestedQuestion,
+          type: 'suggestion'
         }]);
+        setLoading(false);
         return;
       }
 
@@ -138,7 +193,8 @@ How can I help you analyze your business data today?`
         role: 'assistant', 
         content: data.answer,
         sql: data.sql || null,
-        table: data.table || null
+        table: data.table || null,
+        type: data.type || 'success'
       }]);
 
     } catch (error) {
@@ -227,6 +283,9 @@ How can I help you analyze your business data today?`
                   </ReactMarkdown>
                   {msg.suggestedQuestion && (
                     <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f0f9ff', borderRadius: '0.5rem', border: '1px solid #bae6fd' }}>
+                      <p style={{ marginBottom: '0.5rem', fontSize: '0.875rem', color: '#1e40af' }}>
+                        You can reply with <strong>"yes"</strong> or <strong>"yes, I want that"</strong> to proceed with this question:
+                      </p>
                       <button
                         onClick={() => submitQuestion(msg.suggestedQuestion)}
                         style={{
@@ -236,12 +295,30 @@ How can I help you analyze your business data today?`
                           padding: '0.5rem 1rem',
                           borderRadius: '0.375rem',
                           cursor: 'pointer',
+                          fontWeight: '500',
+                          marginRight: '0.5rem'
+                        }}
+                      >
+                        ✓ Use: "{msg.suggestedQuestion}"
+                      </button>
+                      <button
+                        onClick={() => submitQuestion('yes')}
+                        style={{
+                          background: '#10b981',
+                          color: 'white',
+                          border: 'none',
+                          padding: '0.5rem 1rem',
+                          borderRadius: '0.375rem',
+                          cursor: 'pointer',
                           fontWeight: '500'
                         }}
                       >
-                        ✓ Use this question: "{msg.suggestedQuestion}"
+                        ✓ Yes, I want that
                       </button>
                     </div>
+                  )}
+                  {msg.sql && msg.type === 'success' && (
+                    <SQLViewer sql={msg.sql} />
                   )}
                 </>
               ) : (

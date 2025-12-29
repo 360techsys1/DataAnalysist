@@ -8,11 +8,38 @@ import {
   suggestRephrasedQuestion,
   isMetadataQuestion,
   handleMetadataQuestion,
-  extractTableFromSql
+  extractTableFromSql,
+  extractEntitiesFromHistory,
+  isFollowUpQuestion
 } from '../llm.js';
 import { runQuery } from '../db.js';
 
 const router = express.Router();
+
+// Check if user is confirming a suggested question
+function isConfirmation(question, history = []) {
+  const lowerQuestion = question.toLowerCase().trim();
+  const confirmationPatterns = [
+    /^(yes|yeah|yep|yup|sure|ok|okay|alright|correct|right|that's right|exactly|i want that|i mean that|yes i want|yes i mean)(\s|$|\.|!)/i,
+    /^(yes|yeah|yep|yup|sure|ok|okay|alright|correct|right|that's right|exactly|i want that|i mean that|yes i want|yes i mean)\s+(i|to|want|mean)/i,
+  ];
+  
+  // Check if last message was a suggestion
+  const lastMessage = history[history.length - 1];
+  const isSuggestion = lastMessage?.suggestedQuestion || lastMessage?.type === 'suggestion';
+  
+  return isSuggestion && confirmationPatterns.some(pattern => pattern.test(lowerQuestion));
+}
+
+// Check if user is rejecting a suggested question
+function isRejection(question) {
+  const lowerQuestion = question.toLowerCase().trim();
+  const rejectionPatterns = [
+    /^(no|nope|nah|not really|not exactly|that's not|incorrect|wrong)(\s|$|\.|!)/i,
+  ];
+  
+  return rejectionPatterns.some(pattern => pattern.test(lowerQuestion));
+}
 
 // Chat endpoint - handles questions and generates SQL queries
 router.post('/chat', async (req, res) => {
@@ -23,6 +50,31 @@ router.post('/chat', async (req, res) => {
       return res.status(400).json({ 
         error: 'Please provide a question',
         message: 'Your question cannot be empty. Please ask something about your business data.'
+      });
+    }
+
+    // Extract entities from history for context
+    const entities = extractEntitiesFromHistory(history);
+    
+    // Check if user is confirming a suggested question
+    if (isConfirmation(question, history)) {
+      const lastMessage = history[history.length - 1];
+      const suggestedQuestion = lastMessage?.suggestedQuestion;
+      if (suggestedQuestion) {
+        console.log('User confirmed suggested question, proceeding with:', suggestedQuestion);
+        // Proceed with the suggested question
+        // We'll handle it in the normal flow by replacing the question
+        req.body.question = suggestedQuestion;
+        // Continue to normal processing below
+      }
+    }
+    
+    // Check if user is rejecting a suggested question
+    if (isRejection(question)) {
+      return res.json({
+        answer: `No problem! Could you please rephrase your question with more specific details? For example:\n\n• Specify time periods (e.g., "last 6 months", "2024")\n• Be clear about what you want (e.g., "top 3 products per distributor")\n• Include any filters or criteria you have in mind\n\nI'm here to help once you provide more details!`,
+        rowCount: 0,
+        type: 'rejection'
       });
     }
 
@@ -41,8 +93,8 @@ router.post('/chat', async (req, res) => {
       });
     }
 
-    // Check if message is conversational (not a data query)
-    if (isConversationalMessage(question, history)) {
+    // Check if message is conversational (not a data query) - but allow confirmations through
+    if (isConversationalMessage(question, history) && !isConfirmation(question, history)) {
       console.log('Detected conversational message, handling conversationally...');
       const conversationalResponse = await handleConversationalMessage(question, history);
       return res.json({
@@ -62,40 +114,46 @@ router.post('/chat', async (req, res) => {
       const errorType = error.message === 'SQL_SAFETY_CHECK_FAILED' ? 'SQL_SAFETY_CHECK_FAILED' : 'SQL_GENERATION_FAILED';
       console.error(`❌ ${errorType}:`, error.message);
       
-      // Generate intelligent rephrased suggestion
-      const suggestedQuestion = await suggestRephrasedQuestion(question, errorType, history);
+      // Generate intelligent rephrased suggestion with context
+      const suggestedQuestion = await suggestRephrasedQuestion(question, errorType, history, entities);
       
       if (suggestedQuestion && suggestedQuestion.toLowerCase() !== question.toLowerCase()) {
-        // Return a message asking if they meant the suggested question
+        // Return a friendly message asking if they meant the suggested question
         return res.json({
-          answer: `I'm having trouble understanding your question exactly as written. 
+          answer: `I want to make sure I understand your question correctly! 🤔
 
 **Did you mean to ask:**
 > "${suggestedQuestion}"
 
-If yes, please confirm and I'll fetch that data for you. If not, feel free to rephrase your question with more specific details like:
-• Time periods (e.g., "2022 to 2024", "last 3 years", "January 2024")
-• What data you want (e.g., "sales", "distributors", "products")
-• Any filters (e.g., specific product names, distributor names, regions)`,
+You can simply reply with **"yes"** or **"yes, I want that"** and I'll fetch that data for you right away!
+
+If that's not quite what you're looking for, feel free to rephrase your question with more specific details like:
+• Time periods (e.g., "last 6 months", "2024")
+• What data you want (e.g., "top 3 products per distributor")
+• Any specific filters or criteria`,
           rowCount: 0,
           type: 'suggestion',
           suggestedQuestion: suggestedQuestion
         });
       } else {
         // Fallback if rephrasing also fails
-        return res.status(400).json({
-          error: 'Unable to generate query',
-          message: `I'm having trouble generating a database query for your question. 
+        return res.json({
+          answer: `I'm having a bit of trouble understanding exactly what you're looking for. 😊
 
-**Please try rephrasing with more specific details:**
-• Add time periods (e.g., "2022 to 2024", "last 3 years")
-• Specify what data you want (e.g., "total sales", "distributor rankings")
-• Be specific about filters (product names, distributor names, etc.)
+**Could you help me by being more specific?** For example:
 
-**Example questions:**
+• **Time periods**: "last 6 months", "2024", "past 3 years"
+• **What you want**: "top 3 products", "total sales", "distributor rankings"
+• **Any filters**: specific product names, distributor names, regions
+
+**Here are some example questions that work well:**
+• "Show me the top 10 distributors by sales in the last 6 months"
+• "What are the top 3 best-selling products for each of the top 10 distributors?"
 • "Show me year-over-year sales growth for 2022, 2023, and 2024"
-• "What are the top 10 distributors by total sales?"
-• "Show me primary sales month-wise for the past 3 years"`
+
+Feel free to ask again with more details!`,
+          rowCount: 0,
+          type: 'clarification_needed'
         });
       }
     }
@@ -103,14 +161,19 @@ If yes, please confirm and I'll fetch that data for you. If not, feel free to re
     // Safety check (redundant but extra safety)
     if (!isSqlSafe(sql)) {
       console.error('❌ SQL Safety Check Failed (redundant check):', sql);
-      return res.status(400).json({
-        error: 'Query validation failed',
-        message: `The generated query didn't pass safety validation. Please rephrase your question with more specific details.
+      return res.json({
+        answer: `I want to help you get the right data! 🔒
 
-**Try being more specific:**
-• Add time periods (e.g., "last month", "January 2024")
-• Specify what you want to see (e.g., "top 10", "total sales")
-• Include product or distributor names if relevant`
+For security reasons, I can only run read-only queries. Your question seems to require something that's not allowed.
+
+**Could you try rephrasing with:**
+• More specific time periods (e.g., "last 6 months", "2024")
+• Clearer data requests (e.g., "top 10 distributors", "total sales")
+• Specific filters if needed (product names, distributor names, etc.)
+
+**Example:** Instead of "show me everything", try "Show me the top 10 distributors by sales in the last 6 months"`,
+        rowCount: 0,
+        type: 'safety_check_failed'
       });
     }
 
@@ -131,68 +194,79 @@ If yes, please confirm and I'll fetch that data for you. If not, feel free to re
                                  error.message.includes('invalid') ||
                                  error.originalError?.message?.includes('ORDER BY');
       
-      // If SQL syntax error, provide helpful suggestions for complex queries
+      // NEVER show technical SQL errors to users - always friendly messages
       if (hasSqlSyntaxError) {
-        const errorDetail = error.originalError?.message || error.message;
-        const isOrderByError = errorDetail.includes('ORDER BY');
-        
-        let suggestionMessage = `I encountered a SQL syntax error while generating the query. This usually happens with complex queries that need ranking/sorting.
-
-**The issue:** ${isOrderByError ? 'ORDER BY cannot be used in CTEs (Common Table Expressions) without TOP/OFFSET in SQL Server' : 'SQL syntax error in generated query'}`;
-
         // Check if the question was about top distributors/products
-        if (/top.*distribut.*product|distribut.*top.*product|hero product/i.test(question)) {
-          suggestionMessage += `
+        if (/top.*distribut.*product|distribut.*top.*product|hero product|best.*product.*each|each.*best.*product/i.test(question)) {
+          const suggestedQuestion = await suggestRephrasedQuestion(question, 'SQL_SYNTAX_ERROR', history, entities);
+          
+          if (suggestedQuestion) {
+            return res.json({
+              answer: `I want to help you get exactly what you need! 😊
 
-**For questions like "top X distributors and their top Y products", try these clearer versions:**
+Your question is a bit complex for me to process directly. Let me suggest a clearer way to ask:
 
-1. "Show me the top 3 distributors by total sales, and for each distributor, show their top 2 best-selling products"
-2. "What are the top 3 distributors by sales amount, and what are their top 2 products by sales?"
-3. "List top 3 distributors with their highest selling products - show 2 products per distributor"
+**Did you mean:**
+> "${suggestedQuestion}"
 
-**Tips for better questions:**
-• Be specific: "by sales amount" or "by quantity" instead of just "top"
-• Use "for each" or "per distributor" to clarify grouping
-• Specify the ranking criteria clearly`;
-        } else {
-          suggestionMessage += `
+Just reply with **"yes"** and I'll fetch that data for you!
 
-**Here's how to improve your question:**
+**Or, if you want to try a different approach, here are some tips:**
+• Be specific: "top 3 products per distributor" instead of "best products"
+• Use clear grouping: "for each distributor" or "per distributor"
+• Specify ranking: "by sales amount" or "by quantity"
 
-**Tips:**
-• Break complex questions into simpler parts
-• Be specific about what "top" means (by sales amount, by quantity, by count)
-• Specify time periods clearly (e.g., "last 3 months", "2024")
-• Use clear grouping phrases like "for each" or "per"
-
-**Example improvements:**
-• Instead of: "top distributors and products"
-• Try: "Show me top 10 distributors by total sales amount"`;
+**Example questions that work well:**
+• "Show me the top 3 distributors by sales, and for each one, show their top 2 best-selling products"
+• "What are the top 3 products for each of the top 10 distributors?"`,
+              rowCount: 0,
+              type: 'suggestion',
+              suggestedQuestion: suggestedQuestion
+            });
+          }
         }
         
+        // Generic friendly error for syntax issues
         return res.json({
-          answer: suggestionMessage,
+          answer: `I'm having trouble processing that question in a way that works with our database. 🤔
+
+**Could you try rephrasing it?** Here are some tips:
+
+• **Break it down**: Instead of one complex question, try asking in parts
+• **Be specific**: "top 3 products per distributor" is clearer than "best products"
+• **Use clear phrases**: "for each distributor" or "per distributor" helps me understand
+• **Specify criteria**: "by sales amount" or "by quantity"
+
+**Example improvements:**
+• Instead of: "top distributors and their products"
+• Try: "Show me top 10 distributors by sales, then show top 3 products for each"
+
+Feel free to ask again with a clearer question!`,
           rowCount: 0,
-          type: 'error_with_suggestions',
-          sqlError: error.message
+          type: 'query_complexity_error'
         });
       }
       
-      // Generic database error
-      return res.status(500).json({
-        error: 'Database query failed',
-        message: `I couldn't retrieve the data you requested. This might be because:
-• The data doesn't exist in the database
-• The query couldn't find matching records
-• There's a temporary database issue
+      // Generic database error - friendly message
+      return res.json({
+        answer: `I couldn't find the data you're looking for. 😕
 
-**Please try:**
-• Rephrasing your question
-• Using different time periods
-• Being more specific about what you're looking for
+This might be because:
+• The data doesn't exist for the criteria you specified
+• The time period might be outside our available data range
+• There might be a temporary issue
 
-**Example:** "Show me top 5 distributors by sales last month" instead of "show me sales"`,
-        sqlError: error.message
+**Here's what you can try:**
+• Use a different time period (e.g., "last 6 months" instead of "last year")
+• Be more specific about what you want (e.g., "top 10 distributors" instead of "distributors")
+• Check if product or distributor names are spelled correctly
+
+**Example questions that usually work:**
+• "Show me top 10 distributors by sales in the last 6 months"
+• "What are the best-selling products this year?"
+• "List all distributors and their total sales"`,
+        rowCount: 0,
+        type: 'database_error'
       });
     }
 
@@ -230,11 +304,36 @@ If yes, please confirm and I'll fetch that data for you. If not, feel free to re
       answer = await answerFromData(question, rows, { sql, rowCount });
     } catch (error) {
       console.error('❌ Answer generation error:', error);
-      // Fallback: return data in simple format
+      // Fallback: NEVER show raw JSON - always format in natural language
+      // Try to format the data in a readable way
+      let formattedData = `## 📊 Query Results\n\nI found ${rowCount} record${rowCount !== 1 ? 's' : ''}.\n\n`;
+      
+      if (rowCount > 0) {
+        formattedData += `**Summary:**\n\n`;
+        // Try to format first few rows in a readable way
+        const sampleRows = rows.slice(0, 10);
+        sampleRows.forEach((row, idx) => {
+          const keys = Object.keys(row);
+          if (keys.length > 0) {
+            formattedData += `${idx + 1}. `;
+            keys.forEach((key, keyIdx) => {
+              const value = row[key];
+              formattedData += `**${key}**: ${value}`;
+              if (keyIdx < keys.length - 1) formattedData += ' | ';
+            });
+            formattedData += '\n';
+          }
+        });
+        if (rowCount > 10) {
+          formattedData += `\n*(Showing first 10 of ${rowCount} results)*`;
+        }
+      }
+      
       return res.json({
-        answer: `## 📊 Query Results\n\nFound ${rowCount} records.\n\n**Data:**\n\`\`\`json\n${JSON.stringify(rows.slice(0, 10), null, 2)}\n\`\`\`\n\n${rowCount > 10 ? `*(Showing first 10 of ${rowCount} results)*` : ''}`,
+        answer: formattedData,
         rowCount,
-        type: 'fallback'
+        type: 'fallback',
+        sql: sql // Always include SQL for transparency
       });
     }
 
@@ -245,7 +344,7 @@ If yes, please confirm and I'll fetch that data for you. If not, feel free to re
       answer,
       rowCount,
       type: 'success',
-      sql: sql.substring(0, 200) + (sql.length > 200 ? '...' : ''), // Truncated for response
+      sql: sql, // Always include full SQL for user visibility
       table: tableUsed // Track which table was used for follow-up questions
     });
 
