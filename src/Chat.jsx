@@ -3,7 +3,6 @@ import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FiSend, FiDatabase, FiLogOut, FiChevronDown, FiChevronUp } from 'react-icons/fi';
-import Chart from './components/Chart';
 import './chat.css';
 
 // SQL Viewer Component - Collapsible
@@ -202,20 +201,12 @@ How can I help you analyze your business data today?`
       }
 
       // Add assistant response (include metadata if available)
-      console.log('Received response data:', { 
-        hasChartData: !!data.chartData, 
-        chartType: data.chartType,
-        chartData: data.chartData 
-      });
-      
       setMessages(prev => [...prev, { 
         role: 'assistant', 
         content: data.answer,
         sql: data.sql || null,
         table: data.table || null,
-        type: data.type || 'success',
-        chartData: data.chartData || null,
-        chartType: data.chartType || null
+        type: data.type || 'success'
       }]);
 
     } catch (error) {
@@ -302,9 +293,6 @@ How can I help you analyze your business data today?`
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {msg.content}
                   </ReactMarkdown>
-                  {msg.chartData ? (
-                    <Chart chartData={msg.chartData} chartType={msg.chartType} />
-                  ) : null}
                   {msg.suggestedQuestion && (
                     <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f0f9ff', borderRadius: '0.5rem', border: '1px solid #bae6fd' }}>
                       <p style={{ marginBottom: '0.5rem', fontSize: '0.875rem', color: '#1e40af' }}>
