@@ -5,7 +5,6 @@ import {
   isSqlSafe,
   isConversationalMessage,
   handleConversationalMessage,
-  suggestRephrasedQuestion,
   isMetadataQuestion,
   handleMetadataQuestion,
   extractTableFromSql,
@@ -15,31 +14,6 @@ import {
 import { runQuery } from '../db.js';
 
 const router = express.Router();
-
-// Check if user is confirming a suggested question
-function isConfirmation(question, history = []) {
-  const lowerQuestion = question.toLowerCase().trim();
-  const confirmationPatterns = [
-    /^(yes|yeah|yep|yup|sure|ok|okay|alright|correct|right|that's right|exactly|i want that|i mean that|yes i want|yes i mean)(\s|$|\.|!)/i,
-    /^(yes|yeah|yep|yup|sure|ok|okay|alright|correct|right|that's right|exactly|i want that|i mean that|yes i want|yes i mean)\s+(i|to|want|mean)/i,
-  ];
-  
-  // Check if last message was a suggestion
-  const lastMessage = history[history.length - 1];
-  const isSuggestion = lastMessage?.suggestedQuestion || lastMessage?.type === 'suggestion';
-  
-  return isSuggestion && confirmationPatterns.some(pattern => pattern.test(lowerQuestion));
-}
-
-// Check if user is rejecting a suggested question
-function isRejection(question) {
-  const lowerQuestion = question.toLowerCase().trim();
-  const rejectionPatterns = [
-    /^(no|nope|nah|not really|not exactly|that's not|incorrect|wrong)(\s|$|\.|!)/i,
-  ];
-  
-  return rejectionPatterns.some(pattern => pattern.test(lowerQuestion));
-}
 
 // Chat endpoint - handles questions and generates SQL queries
 router.post('/chat', async (req, res) => {
@@ -55,28 +29,6 @@ router.post('/chat', async (req, res) => {
 
     // Extract entities from history for context
     const entities = extractEntitiesFromHistory(history);
-    
-    // Check if user is confirming a suggested question
-    if (isConfirmation(question, history)) {
-      const lastMessage = history[history.length - 1];
-      const suggestedQuestion = lastMessage?.suggestedQuestion;
-      if (suggestedQuestion) {
-        console.log('User confirmed suggested question, proceeding with:', suggestedQuestion);
-        // Replace the question with the suggested one so it gets processed
-        question = suggestedQuestion;
-        req.body.question = suggestedQuestion;
-        // Continue to normal processing below - don't return, let it process the suggested question
-      }
-    }
-    
-    // Check if user is rejecting a suggested question
-    if (isRejection(question)) {
-      return res.json({
-        answer: `No problem! Could you please rephrase your question with more specific details? For example:\n\n• Specify time periods (e.g., "last 6 months", "2024")\n• Be clear about what you want (e.g., "top 3 products per distributor")\n• Include any filters or criteria you have in mind\n\nI'm here to help once you provide more details!`,
-        rowCount: 0,
-        type: 'rejection'
-      });
-    }
 
     // Check if message is asking about previous query metadata (table used, data source)
     const lastMessage = history[history.length - 1];
@@ -93,8 +45,8 @@ router.post('/chat', async (req, res) => {
       });
     }
 
-    // Check if message is conversational (not a data query) - but allow confirmations through
-    if (isConversationalMessage(question, history) && !isConfirmation(question, history)) {
+    // Check if message is conversational (not a data query)
+    if (isConversationalMessage(question, history)) {
       console.log('Detected conversational message, handling conversationally...');
       const conversationalResponse = await handleConversationalMessage(question, history);
       return res.json({
@@ -126,54 +78,26 @@ router.post('/chat', async (req, res) => {
         });
       }
       
-      // Generate intelligent rephrased suggestion with context
-      let suggestedQuestion = null;
-      try {
-        suggestedQuestion = await suggestRephrasedQuestion(question, errorType, history, entities);
-      } catch (suggestError) {
-        console.error('Error generating suggestion:', suggestError);
-        // Continue without suggestion
-      }
-      
-      if (suggestedQuestion && suggestedQuestion.toLowerCase() !== question.toLowerCase()) {
-        // Return a friendly message asking if they meant the suggested question
-        return res.json({
-          answer: `I want to make sure I understand your question correctly! 🤔
-
-**Did you mean to ask:**
-> "${suggestedQuestion}"
-
-You can simply reply with **"yes"** or **"yes, I want that"** and I'll fetch that data for you right away!
-
-If that's not quite what you're looking for, feel free to rephrase your question with more specific details like:
-• Time periods (e.g., "last 6 months", "2024")
-• What data you want (e.g., "top 3 products per distributor")
-• Any specific filters or criteria`,
-          rowCount: 0,
-          type: 'suggestion',
-          suggestedQuestion: suggestedQuestion
-        });
-      } else {
-        // Fallback if rephrasing also fails - but be more helpful
-        return res.json({
-          answer: `I'm having a bit of trouble understanding exactly what you're looking for. 😊
+      // Friendly error message without suggestions
+      return res.json({
+        answer: `I'm having a bit of trouble understanding exactly what you're looking for. 😊
 
 **Could you help me by being more specific?** For example:
 
-• **Time periods**: "last 6 months", "2024", "past 3 years"
-• **What you want**: "top 3 products", "total sales", "distributor rankings"
+• **Time periods**: "last 6 months", "2024", "past 3 years", "past 10 days"
+• **What you want**: "top 10 products", "total sales", "distributor rankings"
 • **Any filters**: specific product names, distributor names, regions
 
 **Here are some example questions that work well:**
 • "Show me the top 10 distributors by sales in the last 6 months"
+• "List top 10 products from past 10 days in terms of sales"
 • "What are the top 3 best-selling products for each of the top 10 distributors?"
 • "Show me year-over-year sales growth for 2022, 2023, and 2024"
 
 Feel free to ask again with more details!`,
-          rowCount: 0,
-          type: 'clarification_needed'
-        });
-      }
+        rowCount: 0,
+        type: 'clarification_needed'
+      });
     }
 
     // Safety check (redundant but extra safety)
@@ -214,36 +138,6 @@ For security reasons, I can only run read-only queries. Your question seems to r
       
       // NEVER show technical SQL errors to users - always friendly messages
       if (hasSqlSyntaxError) {
-        // Check if the question was about top distributors/products
-        if (/top.*distribut.*product|distribut.*top.*product|hero product|best.*product.*each|each.*best.*product/i.test(question)) {
-          const suggestedQuestion = await suggestRephrasedQuestion(question, 'SQL_SYNTAX_ERROR', history, entities);
-          
-          if (suggestedQuestion) {
-            return res.json({
-              answer: `I want to help you get exactly what you need! 😊
-
-Your question is a bit complex for me to process directly. Let me suggest a clearer way to ask:
-
-**Did you mean:**
-> "${suggestedQuestion}"
-
-Just reply with **"yes"** and I'll fetch that data for you!
-
-**Or, if you want to try a different approach, here are some tips:**
-• Be specific: "top 3 products per distributor" instead of "best products"
-• Use clear grouping: "for each distributor" or "per distributor"
-• Specify ranking: "by sales amount" or "by quantity"
-
-**Example questions that work well:**
-• "Show me the top 3 distributors by sales, and for each one, show their top 2 best-selling products"
-• "What are the top 3 products for each of the top 10 distributors?"`,
-              rowCount: 0,
-              type: 'suggestion',
-              suggestedQuestion: suggestedQuestion
-            });
-          }
-        }
-        
         // Generic friendly error for syntax issues
         return res.json({
           answer: `I'm having trouble processing that question in a way that works with our database. 🤔
@@ -253,6 +147,7 @@ Just reply with **"yes"** and I'll fetch that data for you!
 • **Break it down**: Instead of one complex question, try asking in parts
 • **Be specific**: "top 3 products per distributor" is clearer than "best products"
 • **Use clear phrases**: "for each distributor" or "per distributor" helps me understand
+• **Time periods**: "last 6 months", "2024", "past 10 days"
 • **Specify criteria**: "by sales amount" or "by quantity"
 
 **Example improvements:**

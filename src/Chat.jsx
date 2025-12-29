@@ -188,18 +188,6 @@ How can I help you analyze your business data today?`
         return;
       }
 
-      // Handle suggestion type (rephrased question suggestion)
-      if (data.type === 'suggestion' && data.suggestedQuestion) {
-        setMessages(prev => [...prev, { 
-          role: 'assistant', 
-          content: data.answer,
-          suggestedQuestion: data.suggestedQuestion,
-          type: 'suggestion'
-        }]);
-        setLoading(false);
-        return;
-      }
-
       // Add assistant response (include metadata if available)
       setMessages(prev => [...prev, { 
         role: 'assistant', 
@@ -293,42 +281,6 @@ How can I help you analyze your business data today?`
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {msg.content}
                   </ReactMarkdown>
-                  {msg.suggestedQuestion && (
-                    <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f0f9ff', borderRadius: '0.5rem', border: '1px solid #bae6fd' }}>
-                      <p style={{ marginBottom: '0.5rem', fontSize: '0.875rem', color: '#1e40af' }}>
-                        You can reply with <strong>"yes"</strong> or <strong>"yes, I want that"</strong> to proceed with this question:
-                      </p>
-                      <button
-                        onClick={() => submitQuestion(msg.suggestedQuestion)}
-                        style={{
-                          background: '#2563eb',
-                          color: 'white',
-                          border: 'none',
-                          padding: '0.5rem 1rem',
-                          borderRadius: '0.375rem',
-                          cursor: 'pointer',
-                          fontWeight: '500',
-                          marginRight: '0.5rem'
-                        }}
-                      >
-                        ✓ Use: "{msg.suggestedQuestion}"
-                      </button>
-                      <button
-                        onClick={() => submitQuestion('yes')}
-                        style={{
-                          background: '#10b981',
-                          color: 'white',
-                          border: 'none',
-                          padding: '0.5rem 1rem',
-                          borderRadius: '0.375rem',
-                          cursor: 'pointer',
-                          fontWeight: '500'
-                        }}
-                      >
-                        ✓ Yes, I want that
-                      </button>
-                    </div>
-                  )}
                   {msg.sql && msg.type === 'success' && (
                     <SQLViewer sql={msg.sql} />
                   )}
