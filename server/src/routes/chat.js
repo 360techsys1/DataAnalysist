@@ -339,13 +339,160 @@ This might be because:
 
     // Extract table information for context tracking
     const tableUsed = extractTableFromSql(sql);
+    
+    // Detect if user asked for charts/graphs
+    const lowerQuestion = question.toLowerCase();
+    const wantsChart = /(chart|graph|plot|visualize|visualization|bar chart|line chart|pie chart|show.*graph|show.*chart|display.*graph|display.*chart|visual|diagram)/i.test(lowerQuestion);
+    
+    // Determine chart type and prepare data
+    let chartData = null;
+    let chartType = null;
+    
+    // Always try to generate charts if user asks, or if data is suitable for visualization
+    const shouldGenerateChart = wantsChart || (rowCount > 0 && rowCount <= 50 && rowCount > 1);
+    
+    if (shouldGenerateChart && rowCount > 0 && rowCount <= 100) {
+      // Analyze data structure to determine best chart type
+      const firstRow = rows[0];
+      const keys = Object.keys(firstRow);
+      
+      // Check for time-series data (Year, Month, Date, etc.)
+      const timeKey = keys.find(k => /year|month|date|day|week|quarter|time/i.test(k));
+      const hasTimeDimension = !!timeKey;
+      
+      // Check for numeric values (sales, amount, quantity, etc.)
+      const numericKeys = keys.filter(k => {
+        if (k === timeKey) return false;
+        const val = firstRow[k];
+        if (typeof val === 'number') return true;
+        if (typeof val === 'string') {
+          const num = parseFloat(val);
+          return !isNaN(num) && isFinite(num);
+        }
+        return false;
+      });
+      
+      // Check for categorical data (distributor names, product names, etc.)
+      const categoricalKeys = keys.filter(k => {
+        if (k === timeKey || numericKeys.includes(k)) return false;
+        const val = firstRow[k];
+        return typeof val === 'string' && val.length < 100; // Reasonable length
+      });
+      
+      // Determine chart type based on user preference or data structure
+      let preferredChartType = null;
+      if (/(line|trend|over time|time series)/i.test(lowerQuestion)) {
+        preferredChartType = 'line';
+      } else if (/(pie|percentage|share|distribution)/i.test(lowerQuestion)) {
+        preferredChartType = 'pie';
+      } else if (/(bar|column)/i.test(lowerQuestion)) {
+        preferredChartType = 'bar';
+      }
+      
+      if (hasTimeDimension && numericKeys.length > 0) {
+        // Time series - use line chart
+        chartType = preferredChartType || 'line';
+        const timeKeyName = timeKey;
+        chartData = {
+          type: chartType,
+          data: rows.map(row => {
+            const dataPoint = {};
+            // Add time dimension
+            if (timeKeyName) {
+              const timeVal = row[timeKeyName];
+              // Format time value
+              if (typeof timeVal === 'number' && timeVal > 100000) {
+                // Likely a date key (YYYYMMDD)
+                const dateStr = String(timeVal);
+                if (dateStr.length === 8) {
+                  dataPoint.x = `${dateStr.substring(0,4)}-${dateStr.substring(4,6)}-${dateStr.substring(6,8)}`;
+                } else {
+                  dataPoint.x = timeVal;
+                }
+              } else {
+                dataPoint.x = timeVal;
+              }
+            }
+            // Add numeric values
+            numericKeys.forEach(key => {
+              const val = row[key];
+              dataPoint[key] = typeof val === 'number' ? val : parseFloat(val) || 0;
+            });
+            return dataPoint;
+          }),
+          xAxis: timeKeyName || 'x',
+          yAxis: numericKeys[0] || 'value'
+        };
+      } else if (categoricalKeys.length > 0 && numericKeys.length > 0) {
+        // Categorical data - use bar chart (or pie if small dataset)
+        chartType = preferredChartType || (rowCount <= 10 ? 'pie' : 'bar');
+        const categoryKey = categoricalKeys[0];
+        chartData = {
+          type: chartType,
+          data: rows.slice(0, 30).map(row => {
+            const dataPoint = {};
+            // Add category name
+            if (categoryKey) {
+              const catVal = String(row[categoryKey]);
+              dataPoint.name = catVal.length > 40 ? catVal.substring(0, 37) + '...' : catVal;
+            } else {
+              dataPoint.name = 'Item';
+            }
+            // Add numeric values
+            numericKeys.forEach(key => {
+              const val = row[key];
+              dataPoint.value = typeof val === 'number' ? val : parseFloat(val) || 0;
+              dataPoint[key] = typeof val === 'number' ? val : parseFloat(val) || 0;
+            });
+            return dataPoint;
+          }),
+          xAxis: categoryKey || 'name',
+          yAxis: numericKeys[0] || 'value'
+        };
+      } else if (numericKeys.length >= 2) {
+        // Multiple numeric values - use bar chart
+        chartType = preferredChartType || 'bar';
+        chartData = {
+          type: chartType,
+          data: rows.slice(0, 30).map((row, idx) => {
+            const dataPoint = { name: `Item ${idx + 1}` };
+            numericKeys.forEach(key => {
+              const val = row[key];
+              dataPoint[key] = typeof val === 'number' ? val : parseFloat(val) || 0;
+            });
+            return dataPoint;
+          }),
+          xAxis: 'name',
+          yAxis: numericKeys[0]
+        };
+      } else if (numericKeys.length === 1 && rowCount <= 20) {
+        // Single numeric value, small dataset - use bar chart
+        chartType = preferredChartType || 'bar';
+        chartData = {
+          type: chartType,
+          data: rows.map((row, idx) => {
+            const val = row[numericKeys[0]];
+            return {
+              name: `Item ${idx + 1}`,
+              value: typeof val === 'number' ? val : parseFloat(val) || 0,
+              [numericKeys[0]]: typeof val === 'number' ? val : parseFloat(val) || 0
+            };
+          }),
+          xAxis: 'name',
+          yAxis: numericKeys[0] || 'value'
+        };
+      }
+    }
 
     res.json({
       answer,
       rowCount,
       type: 'success',
       sql: sql, // Always include full SQL for user visibility
-      table: tableUsed // Track which table was used for follow-up questions
+      table: tableUsed, // Track which table was used for follow-up questions
+      chartData: chartData, // Include chart data if applicable
+      chartType: chartType, // Chart type
+      rawData: wantsChart ? rows.slice(0, 100) : undefined // Include raw data for charting
     });
 
   } catch (error) {
