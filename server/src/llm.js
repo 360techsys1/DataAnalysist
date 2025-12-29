@@ -518,6 +518,14 @@ export async function generateSqlFromQuestion(question, history = []) {
   // Last 3 years (including current)
   const threeYearsAgoStart = parseInt(`${currentYear - 2}0101`);
   
+  // Calculate past 10 days date key (example for common case)
+  const past10DaysDate = new Date(now);
+  past10DaysDate.setDate(past10DaysDate.getDate() - 10);
+  const past10DaysYear = past10DaysDate.getFullYear();
+  const past10DaysMonth = past10DaysDate.getMonth() + 1;
+  const past10DaysDay = past10DaysDate.getDate();
+  const past10DaysDateKey = parseInt(`${past10DaysYear}${String(past10DaysMonth).padStart(2, '0')}${String(past10DaysDay).padStart(2, '0')}`);
+  
   const systemPrompt = `You are an expert SQL query generator for Hilal Foods database. Generate SAFE, READ-ONLY SQL SELECT queries based on user questions.
 
 CRITICAL DATE CONTEXT - USE CURRENT DATE FOR RELATIVE QUERIES:
@@ -527,6 +535,7 @@ CRITICAL DATE CONTEXT - USE CURRENT DATE FOR RELATIVE QUERIES:
 IMPORTANT - When user says:
 - "last month" = ${lastMonthYear}-${String(lastMonth).padStart(2, '0')} (DATEKEY >= ${lastMonthDateKey} AND DATEKEY <= ${lastMonthEndDateKey})
 - "last 3 months" = ${threeMonthsAgoYear}-${String(threeMonthsAgoMonth).padStart(2, '0')} to ${lastMonthYear}-${String(lastMonth).padStart(2, '0')} (DATEKEY >= ${threeMonthsAgoDateKey} AND DATEKEY <= ${lastMonthEndDateKey}) - Example: If current is December 2025, this means September-October-November 2025
+- "past X days" or "last X days" = Calculate DATEKEY for (current date - X days) to current date. For example, "past 10 days" means DATEKEY >= ${past10DaysDateKey} AND DATEKEY <= ${currentDateKey}. To calculate: subtract X days from current date ${currentDateKey}
 - "this year" = ${currentYear} (DATEKEY >= ${currentYearStart} AND DATEKEY <= ${currentYearEnd})
 - "last year" = ${currentYear - 1} (DATEKEY >= ${prevYearStart} AND DATEKEY <= ${prevYearEnd})
 - "past 3 years" = ${currentYear - 2}, ${currentYear - 1}, ${currentYear} (DATEKEY >= ${threeYearsAgoStart} AND DATEKEY <= ${currentYearEnd})
@@ -791,8 +800,8 @@ Generate a well-formatted, professional business response. Only use the data pro
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage }
     ], {
-      temperature: 0.7,
-      max_tokens: 2500,
+      temperature: 0.5,
+      max_tokens: 1500,
     });
 
     return response.content;

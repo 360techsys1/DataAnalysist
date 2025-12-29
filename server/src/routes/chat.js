@@ -44,7 +44,7 @@ function isRejection(question) {
 // Chat endpoint - handles questions and generates SQL queries
 router.post('/chat', async (req, res) => {
   try {
-    const { question, history = [] } = req.body;
+    let { question, history = [] } = req.body;
 
     if (!question || !question.trim()) {
       return res.status(400).json({ 
@@ -62,10 +62,10 @@ router.post('/chat', async (req, res) => {
       const suggestedQuestion = lastMessage?.suggestedQuestion;
       if (suggestedQuestion) {
         console.log('User confirmed suggested question, proceeding with:', suggestedQuestion);
-        // Proceed with the suggested question
-        // We'll handle it in the normal flow by replacing the question
+        // Replace the question with the suggested one so it gets processed
+        question = suggestedQuestion;
         req.body.question = suggestedQuestion;
-        // Continue to normal processing below
+        // Continue to normal processing below - don't return, let it process the suggested question
       }
     }
     
