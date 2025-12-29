@@ -800,8 +800,8 @@ Generate a well-formatted, professional business response. Only use the data pro
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage }
     ], {
-      temperature: 0.5,
-      max_tokens: 1500,
+      temperature: 0.7,
+      max_tokens: 2500,
     });
 
     return response.content;
