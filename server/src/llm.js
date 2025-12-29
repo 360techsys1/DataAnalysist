@@ -405,22 +405,23 @@ export function isSqlSafe(sql) {
 
 // Intelligently rephrase user question when SQL generation fails - CONTEXT-AWARE
 export async function suggestRephrasedQuestion(originalQuestion, errorType = 'SQL_GENERATION_FAILED', history = [], entities = null) {
-  // Build context from history
-  const recentContext = history.slice(-3).map(msg => {
-    if (msg.role === 'user') {
-      return `User asked: ${msg.content}`;
-    } else {
-      // Extract key info from assistant response
-      const content = msg.content.substring(0, 300);
-      return `Assistant responded: ${content}`;
-    }
-  }).join('\n\n');
-  
-  const entitiesContext = entities && entities.distributors.length > 0 
+  try {
+    // Build context from history
+    const recentContext = history.slice(-3).map(msg => {
+      if (msg.role === 'user') {
+        return `User asked: ${msg.content}`;
+      } else {
+        // Extract key info from assistant response
+        const content = msg.content.substring(0, 300);
+        return `Assistant responded: ${content}`;
+      }
+    }).join('\n\n');
+    
+  const entitiesContext = (entities && entities.distributors && Array.isArray(entities.distributors) && entities.distributors.length > 0)
     ? `\n\nIMPORTANT CONTEXT: The user previously asked about these distributors: ${entities.distributors.slice(0, 10).join(', ')}. When they say "each of these distributors" or "these distributors", they mean these specific ones.`
     : '';
-  
-  const systemPrompt = `You are a helpful assistant that improves user questions for database queries. When a user's question fails to generate a proper SQL query, you should suggest a clearer, more specific version that maintains their intent.
+    
+    const systemPrompt = `You are a helpful assistant that improves user questions for database queries. When a user's question fails to generate a proper SQL query, you should suggest a clearer, more specific version that maintains their intent.
 
 CRITICAL: Use the conversation context to understand what the user is referring to. If they mention "these distributors" or "each of these", they're referring to distributors from a previous query.
 
@@ -439,7 +440,7 @@ Examples:
 - "sales data" -> "Show me total sales by year for the last 3 years"
 - "top stuff" -> "Show me the top 10 distributors by total sales"`;
 
-  const userPrompt = `The user asked: "${originalQuestion}"
+    const userPrompt = `The user asked: "${originalQuestion}"
 
 This question failed to generate a proper database query (${errorType}).${entitiesContext}
 
@@ -457,7 +458,6 @@ Focus on:
 
 Return ONLY the rephrased question, nothing else.`;
 
-  try {
     const response = await callLLM([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
@@ -466,9 +466,11 @@ Return ONLY the rephrased question, nothing else.`;
       max_tokens: 200,
     });
 
-    return response.content.trim().replace(/^["']|["']$/g, '');
+    const suggested = response.content.trim().replace(/^["']|["']$/g, '');
+    return suggested || null;
   } catch (error) {
     console.error('Error generating rephrased question:', error);
+    // Return null instead of throwing - let the caller handle it
     return null;
   }
 }

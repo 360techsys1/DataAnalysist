@@ -109,13 +109,31 @@ router.post('/chat', async (req, res) => {
     let sql;
     try {
       sql = await generateSqlFromQuestion(question, history);
+      console.log('✅ SQL generated successfully:', sql.substring(0, 100) + '...');
     } catch (error) {
       // Handle SQL generation/safety errors with intelligent rephrasing
       const errorType = error.message === 'SQL_SAFETY_CHECK_FAILED' ? 'SQL_SAFETY_CHECK_FAILED' : 'SQL_GENERATION_FAILED';
       console.error(`❌ ${errorType}:`, error.message);
+      console.error('Full error:', error);
+      
+      // Check if it's an LLM API error (network, timeout, etc.)
+      if (error.message.includes('timeout') || error.message.includes('network') || error.message.includes('API')) {
+        return res.status(500).json({
+          error: 'LLM Service Error',
+          message: `I'm having trouble connecting to the AI service right now. This might be because:\n\n• The LLM service (OpenAI/Ollama/Groq) is temporarily unavailable\n• There's a network connectivity issue\n• The request timed out\n\n**Please try again in a moment.** If the problem persists, check your LLM provider configuration.`,
+          rowCount: 0,
+          type: 'service_error'
+        });
+      }
       
       // Generate intelligent rephrased suggestion with context
-      const suggestedQuestion = await suggestRephrasedQuestion(question, errorType, history, entities);
+      let suggestedQuestion = null;
+      try {
+        suggestedQuestion = await suggestRephrasedQuestion(question, errorType, history, entities);
+      } catch (suggestError) {
+        console.error('Error generating suggestion:', suggestError);
+        // Continue without suggestion
+      }
       
       if (suggestedQuestion && suggestedQuestion.toLowerCase() !== question.toLowerCase()) {
         // Return a friendly message asking if they meant the suggested question
@@ -136,7 +154,7 @@ If that's not quite what you're looking for, feel free to rephrase your question
           suggestedQuestion: suggestedQuestion
         });
       } else {
-        // Fallback if rephrasing also fails
+        // Fallback if rephrasing also fails - but be more helpful
         return res.json({
           answer: `I'm having a bit of trouble understanding exactly what you're looking for. 😊
 
