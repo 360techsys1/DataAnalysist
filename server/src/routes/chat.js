@@ -342,7 +342,17 @@ This might be because:
     
     // Detect if user asked for charts/graphs
     const lowerQuestion = question.toLowerCase();
-    const wantsChart = /(chart|graph|plot|visualize|visualization|bar chart|line chart|pie chart|show.*graph|show.*chart|display.*graph|display.*chart|visual|diagram)/i.test(lowerQuestion);
+    const wantsChart = /(chart|graph|plot|visualize|visualization|bar chart|line chart|pie chart|piechart|show.*graph|show.*chart|display.*graph|display.*chart|visual|diagram)/i.test(lowerQuestion);
+    
+    // Determine chart type based on user preference
+    let preferredChartType = null;
+    if (/(line|trend|over time|time series)/i.test(lowerQuestion)) {
+      preferredChartType = 'line';
+    } else if (/(pie|piechart|pie chart|percentage|share|distribution)/i.test(lowerQuestion)) {
+      preferredChartType = 'pie';
+    } else if (/(bar|column|barchart)/i.test(lowerQuestion)) {
+      preferredChartType = 'bar';
+    }
     
     // Determine chart type and prepare data
     let chartData = null;
@@ -351,7 +361,8 @@ This might be because:
     // Always try to generate charts if user asks, or if data is suitable for visualization
     const shouldGenerateChart = wantsChart || (rowCount > 0 && rowCount <= 50 && rowCount > 1);
     
-    if (shouldGenerateChart && rowCount > 0 && rowCount <= 100) {
+    // For charts, we can handle up to 100 rows, but for pie charts we'll limit to top items
+    if (shouldGenerateChart && rowCount > 0) {
       // Analyze data structure to determine best chart type
       const firstRow = rows[0];
       const keys = Object.keys(firstRow);
@@ -378,16 +389,6 @@ This might be because:
         const val = firstRow[k];
         return typeof val === 'string' && val.length < 100; // Reasonable length
       });
-      
-      // Determine chart type based on user preference or data structure
-      let preferredChartType = null;
-      if (/(line|trend|over time|time series)/i.test(lowerQuestion)) {
-        preferredChartType = 'line';
-      } else if (/(pie|percentage|share|distribution)/i.test(lowerQuestion)) {
-        preferredChartType = 'pie';
-      } else if (/(bar|column)/i.test(lowerQuestion)) {
-        preferredChartType = 'bar';
-      }
       
       if (hasTimeDimension && numericKeys.length > 0) {
         // Time series - use line chart
@@ -424,12 +425,24 @@ This might be because:
           yAxis: numericKeys[0] || 'value'
         };
       } else if (categoricalKeys.length > 0 && numericKeys.length > 0) {
-        // Categorical data - use bar chart (or pie if small dataset)
-        chartType = preferredChartType || (rowCount <= 10 ? 'pie' : 'bar');
+        // Categorical data - use bar chart (or pie if small dataset or user requests pie)
+        chartType = preferredChartType || (rowCount <= 15 ? 'pie' : 'bar');
         const categoryKey = categoricalKeys[0];
+        const numericKey = numericKeys[0]; // Use first numeric key for pie charts
+        
+        // For pie charts, limit to top 15 items; for bar charts, limit to top 30 items
+        const maxItems = chartType === 'pie' ? Math.min(rowCount, 15) : Math.min(rowCount, 30);
+        const sortedRows = [...rows]
+          .sort((a, b) => {
+            const aVal = typeof a[numericKey] === 'number' ? a[numericKey] : parseFloat(a[numericKey]) || 0;
+            const bVal = typeof b[numericKey] === 'number' ? b[numericKey] : parseFloat(b[numericKey]) || 0;
+            return bVal - aVal; // Sort descending
+          })
+          .slice(0, maxItems);
+        
         chartData = {
           type: chartType,
-          data: rows.slice(0, 30).map(row => {
+          data: sortedRows.map(row => {
             const dataPoint = {};
             // Add category name
             if (categoryKey) {
@@ -438,23 +451,32 @@ This might be because:
             } else {
               dataPoint.name = 'Item';
             }
-            // Add numeric values
-            numericKeys.forEach(key => {
-              const val = row[key];
-              dataPoint.value = typeof val === 'number' ? val : parseFloat(val) || 0;
-              dataPoint[key] = typeof val === 'number' ? val : parseFloat(val) || 0;
-            });
+            // Add numeric values - for pie charts, use 'value' key
+            const val = row[numericKey];
+            const numVal = typeof val === 'number' ? val : parseFloat(val) || 0;
+            dataPoint.value = numVal;
+            dataPoint[numericKey] = numVal; // Keep original key for bar charts
             return dataPoint;
           }),
           xAxis: categoryKey || 'name',
-          yAxis: numericKeys[0] || 'value'
+          yAxis: numericKey || 'value'
         };
       } else if (numericKeys.length >= 2) {
         // Multiple numeric values - use bar chart
         chartType = preferredChartType || 'bar';
+        // For bar charts, limit to top 30 items for readability
+        const maxBarItems = 30;
+        const sortedRows = [...rows]
+          .sort((a, b) => {
+            const aVal = typeof a[numericKeys[0]] === 'number' ? a[numericKeys[0]] : parseFloat(a[numericKeys[0]]) || 0;
+            const bVal = typeof b[numericKeys[0]] === 'number' ? b[numericKeys[0]] : parseFloat(b[numericKeys[0]]) || 0;
+            return bVal - aVal; // Sort descending
+          })
+          .slice(0, maxBarItems);
+        
         chartData = {
           type: chartType,
-          data: rows.slice(0, 30).map((row, idx) => {
+          data: sortedRows.map((row, idx) => {
             const dataPoint = { name: `Item ${idx + 1}` };
             numericKeys.forEach(key => {
               const val = row[key];
@@ -465,12 +487,21 @@ This might be because:
           xAxis: 'name',
           yAxis: numericKeys[0]
         };
-      } else if (numericKeys.length === 1 && rowCount <= 20) {
-        // Single numeric value, small dataset - use bar chart
+      } else if (numericKeys.length === 1) {
+        // Single numeric value - use bar chart (limit to top items for large datasets)
         chartType = preferredChartType || 'bar';
+        const maxItems = rowCount > 30 ? 30 : rowCount;
+        const sortedRows = [...rows]
+          .sort((a, b) => {
+            const aVal = typeof a[numericKeys[0]] === 'number' ? a[numericKeys[0]] : parseFloat(a[numericKeys[0]]) || 0;
+            const bVal = typeof b[numericKeys[0]] === 'number' ? b[numericKeys[0]] : parseFloat(b[numericKeys[0]]) || 0;
+            return bVal - aVal; // Sort descending
+          })
+          .slice(0, maxItems);
+        
         chartData = {
           type: chartType,
-          data: rows.map((row, idx) => {
+          data: sortedRows.map((row, idx) => {
             const val = row[numericKeys[0]];
             return {
               name: `Item ${idx + 1}`,
@@ -484,6 +515,17 @@ This might be because:
       }
     }
 
+    // Log chart generation for debugging
+    if (wantsChart) {
+      console.log('📊 Chart requested:', {
+        wantsChart,
+        chartType,
+        hasChartData: !!chartData,
+        rowCount,
+        preferredType: preferredChartType
+      });
+    }
+    
     res.json({
       answer,
       rowCount,

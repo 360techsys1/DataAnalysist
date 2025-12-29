@@ -139,6 +139,16 @@ export default function Chart({ chartData, chartType }) {
   }
 
   if (chartType === 'pie' || chartData.type === 'pie') {
+    // Ensure data has 'name' and 'value' keys for pie chart
+    const pieData = data.map(item => ({
+      name: item.name || item[xAxis] || 'Item',
+      value: item.value || item[yAxis] || 0
+    })).filter(item => item.value > 0); // Filter out zero values
+    
+    if (pieData.length === 0) {
+      return null;
+    }
+    
     return (
       <div style={{ marginTop: '1.5rem', marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '1rem', fontSize: '1.125rem', fontWeight: '600' }}>
@@ -147,25 +157,40 @@ export default function Chart({ chartData, chartType }) {
         <ResponsiveContainer width="100%" height={400}>
           <PieChart>
             <Pie
-              data={data}
+              data={pieData}
               cx="50%"
               cy="50%"
               labelLine={false}
-              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+              label={({ name, percent }) => {
+                // Show percentage and truncated name
+                const shortName = name.length > 20 ? name.substring(0, 17) + '...' : name;
+                return `${shortName}: ${(percent * 100).toFixed(1)}%`;
+              }}
               outerRadius={120}
               fill="#8884d8"
-              dataKey={yAxis || 'value'}
-              nameKey={xAxis || 'name'}
+              dataKey="value"
+              nameKey="name"
             >
-              {data.map((entry, index) => (
+              {pieData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Pie>
             <Tooltip 
               formatter={(value) => formatCurrency(value)}
               contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '0.5rem' }}
+              labelStyle={{ fontWeight: 'bold' }}
             />
-            <Legend />
+            <Legend 
+              wrapperStyle={{ paddingTop: '20px' }}
+              formatter={(value) => {
+                const item = pieData.find(d => d.name === value);
+                if (item) {
+                  const shortName = value.length > 30 ? value.substring(0, 27) + '...' : value;
+                  return `${shortName} (${formatCurrency(item.value)})`;
+                }
+                return value;
+              }}
+            />
           </PieChart>
         </ResponsiveContainer>
       </div>
