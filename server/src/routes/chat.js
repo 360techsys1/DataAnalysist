@@ -430,6 +430,14 @@ This might be because:
         const categoryKey = categoricalKeys[0];
         const numericKey = numericKeys[0]; // Use first numeric key for pie charts
         
+        console.log('📊 Generating chart for categorical data:', {
+          chartType,
+          categoryKey,
+          numericKey,
+          rowCount,
+          preferredChartType
+        });
+        
         // For pie charts, limit to top 15 items; for bar charts, limit to top 30 items
         const maxItems = chartType === 'pie' ? Math.min(rowCount, 15) : Math.min(rowCount, 30);
         const sortedRows = [...rows]
@@ -439,6 +447,8 @@ This might be because:
             return bVal - aVal; // Sort descending
           })
           .slice(0, maxItems);
+        
+        console.log('📊 Sorted rows for chart:', sortedRows.slice(0, 3));
         
         chartData = {
           type: chartType,
@@ -461,6 +471,12 @@ This might be because:
           xAxis: categoryKey || 'name',
           yAxis: numericKey || 'value'
         };
+        
+        console.log('📊 Chart data generated:', {
+          type: chartData.type,
+          dataLength: chartData.data.length,
+          sampleData: chartData.data.slice(0, 2)
+        });
       } else if (numericKeys.length >= 2) {
         // Multiple numeric values - use bar chart
         chartType = preferredChartType || 'bar';

@@ -202,6 +202,12 @@ How can I help you analyze your business data today?`
       }
 
       // Add assistant response (include metadata if available)
+      console.log('Received response data:', { 
+        hasChartData: !!data.chartData, 
+        chartType: data.chartType,
+        chartData: data.chartData 
+      });
+      
       setMessages(prev => [...prev, { 
         role: 'assistant', 
         content: data.answer,
@@ -296,9 +302,9 @@ How can I help you analyze your business data today?`
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {msg.content}
                   </ReactMarkdown>
-                  {msg.chartData && (
+                  {msg.chartData ? (
                     <Chart chartData={msg.chartData} chartType={msg.chartType} />
-                  )}
+                  ) : null}
                   {msg.suggestedQuestion && (
                     <div style={{ marginTop: '1rem', padding: '0.75rem', background: '#f0f9ff', borderRadius: '0.5rem', border: '1px solid #bae6fd' }}>
                       <p style={{ marginBottom: '0.5rem', fontSize: '0.875rem', color: '#1e40af' }}>

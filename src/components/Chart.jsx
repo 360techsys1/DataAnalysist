@@ -33,11 +33,28 @@ const formatCurrency = (num) => {
 };
 
 export default function Chart({ chartData, chartType }) {
+  // Debug logging
+  console.log('Chart component rendered:', { chartData, chartType });
+  
   if (!chartData || !chartData.data || chartData.data.length === 0) {
-    return null;
+    console.warn('Chart: No data available', { chartData, chartType });
+    return (
+      <div style={{ 
+        marginTop: '1rem', 
+        padding: '1rem', 
+        background: '#fef3c7', 
+        border: '1px solid #fbbf24',
+        borderRadius: '0.5rem',
+        color: '#92400e'
+      }}>
+        ⚠️ Chart data is not available. Please try asking for the chart again with more specific details.
+      </div>
+    );
   }
 
   const { data, xAxis, yAxis } = chartData;
+  
+  console.log('Chart data structure:', { dataLength: data.length, xAxis, yAxis, firstItem: data[0] });
   
   // Determine which keys are numeric for multiple series
   const numericKeys = Object.keys(data[0] || {}).filter(key => 
@@ -96,16 +113,36 @@ export default function Chart({ chartData, chartType }) {
   }
 
   if (chartType === 'bar' || chartData.type === 'bar') {
+    // For bar charts, ensure we have the right data structure
+    const barData = data.map(item => {
+      const barItem = { name: item.name || item[xAxis] || 'Item' };
+      // Add all numeric values
+      Object.keys(item).forEach(key => {
+        if (key !== 'name' && key !== xAxis && typeof item[key] === 'number') {
+          barItem[key] = item[key];
+        } else if (key === yAxis || key === 'value') {
+          barItem[key] = typeof item[key] === 'number' ? item[key] : parseFloat(item[key]) || 0;
+        }
+      });
+      return barItem;
+    });
+    
+    const barNumericKeys = Object.keys(barData[0] || {}).filter(key => 
+      key !== 'name' && typeof barData[0][key] === 'number'
+    );
+    
+    console.log('Bar chart data:', { barData: barData.slice(0, 2), barNumericKeys, yAxis });
+    
     return (
       <div style={{ marginTop: '1.5rem', marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '1rem', fontSize: '1.125rem', fontWeight: '600' }}>
           📊 Bar Chart
         </h3>
         <ResponsiveContainer width="100%" height={400}>
-          <BarChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
+          <BarChart data={barData} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis 
-              dataKey={xAxis || 'name'} 
+              dataKey="name" 
               tick={{ fontSize: 12 }}
               angle={-45}
               textAnchor="end"
@@ -120,8 +157,8 @@ export default function Chart({ chartData, chartType }) {
               contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '0.5rem' }}
             />
             <Legend />
-            {numericKeys.length > 0 ? (
-              numericKeys.map((key, idx) => (
+            {barNumericKeys.length > 0 ? (
+              barNumericKeys.map((key, idx) => (
                 <Bar
                   key={key}
                   dataKey={key}
