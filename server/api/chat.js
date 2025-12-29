@@ -7,7 +7,6 @@ import {
   isSqlSafe,
   isConversationalMessage,
   handleConversationalMessage,
-  suggestRephrasedQuestion,
   isMetadataQuestion,
   handleMetadataQuestion,
   extractTableFromSql
@@ -96,46 +95,40 @@ Your self-hosted Ollama server took too long to respond (over 55 seconds). This 
         });
       }
       
-      // Handle SQL generation/safety errors with intelligent rephrasing
+      // Handle SQL generation/safety errors - friendly message without suggestions
       const errorType = error.message === 'SQL_SAFETY_CHECK_FAILED' ? 'SQL_SAFETY_CHECK_FAILED' : 'SQL_GENERATION_FAILED';
       console.error(`❌ ${errorType}:`, error.message);
       
-      // Generate intelligent rephrased suggestion
-      const suggestedQuestion = await suggestRephrasedQuestion(question, errorType, history);
-      
-      if (suggestedQuestion && suggestedQuestion.toLowerCase() !== question.toLowerCase()) {
-        // Return a message asking if they meant the suggested question
-        return res.json({
-          answer: `I'm having trouble understanding your question exactly as written. 
-
-**Did you mean to ask:**
-> "${suggestedQuestion}"
-
-If yes, please confirm and I'll fetch that data for you. If not, feel free to rephrase your question with more specific details like:
-• Time periods (e.g., "2022 to 2024", "last 3 years", "January 2024")
-• What data you want (e.g., "sales", "distributors", "products")
-• Any filters (e.g., specific product names, distributor names, regions)`,
+      // Check if it's an LLM API error (network, timeout, etc.)
+      if (error.message.includes('timeout') || error.message.includes('network') || error.message.includes('API')) {
+        return res.status(500).json({
+          error: 'LLM Service Error',
+          message: `I'm having trouble connecting to the AI service right now. This might be because:\n\n• The LLM service (OpenAI/Ollama/Groq) is temporarily unavailable\n• There's a network connectivity issue\n• The request timed out\n\n**Please try again in a moment.** If the problem persists, check your LLM provider configuration.`,
           rowCount: 0,
-          type: 'suggestion',
-          suggestedQuestion: suggestedQuestion
-        });
-      } else {
-        // Fallback if rephrasing also fails
-        return res.status(400).json({
-          error: 'Unable to generate query',
-          message: `I'm having trouble generating a database query for your question. 
-
-**Please try rephrasing with more specific details:**
-• Add time periods (e.g., "2022 to 2024", "last 3 years")
-• Specify what data you want (e.g., "total sales", "distributor rankings")
-• Be specific about filters (product names, distributor names, etc.)
-
-**Example questions:**
-• "Show me year-over-year sales growth for 2022, 2023, and 2024"
-• "What are the top 10 distributors by total sales?"
-• "Show me primary sales month-wise for the past 3 years"`
+          type: 'service_error'
         });
       }
+      
+      // Friendly error message without suggestions
+      return res.json({
+        answer: `I'm having a bit of trouble understanding exactly what you're looking for. 😊
+
+**Could you help me by being more specific?** For example:
+
+• **Time periods**: "last 6 months", "2024", "past 3 years", "past 10 days"
+• **What you want**: "top 10 products", "total sales", "distributor rankings"
+• **Any filters**: specific product names, distributor names, regions
+
+**Here are some example questions that work well:**
+• "Show me the top 10 distributors by sales in the last 6 months"
+• "List top 10 products from past 10 days in terms of sales"
+• "What are the top 3 best-selling products for each of the top 10 distributors?"
+• "Show me year-over-year sales growth for 2022, 2023, and 2024"
+
+Feel free to ask again with more details!`,
+        rowCount: 0,
+        type: 'clarification_needed'
+      });
     }
 
     // Safety check (redundant but extra safety)
@@ -308,7 +301,7 @@ ${rowCount > 10 ? `*(Showing first 10 of ${rowCount} results)*` : ''}
       answer,
       rowCount,
       type: 'success',
-      sql: sql.substring(0, 200) + (sql.length > 200 ? '...' : ''), // Truncated for response
+      sql: sql, // Full SQL query
       table: tableUsed // Track which table was used for follow-up questions
     });
 
