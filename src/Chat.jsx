@@ -9,6 +9,9 @@ import './chat.css';
 function SQLViewer({ sql }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
+  // Ensure we have the full SQL query (no truncation)
+  const fullSql = sql || 'No SQL query available';
+  
   return (
     <div style={{ 
       marginTop: '1rem', 
@@ -34,23 +37,32 @@ function SQLViewer({ sql }) {
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <FiDatabase size={16} />
-          View SQL Query
+          View SQL Query {sql && `(${sql.length} characters)`}
         </span>
         {isExpanded ? <FiChevronUp size={16} /> : <FiChevronDown size={16} />}
       </button>
       {isExpanded && (
         <div style={{ 
           padding: '1rem', 
-          background: '#1f2937', 
-          color: '#f3f4f6',
+          background: '#ffffff', 
+          color: '#000000',
           fontFamily: 'monospace',
           fontSize: '0.875rem',
           overflowX: 'auto',
-          maxHeight: '400px',
-          overflowY: 'auto'
+          maxHeight: '600px',
+          overflowY: 'auto',
+          borderTop: '1px solid #e5e7eb'
         }}>
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {sql}
+          <pre style={{ 
+            margin: 0, 
+            whiteSpace: 'pre-wrap', 
+            wordBreak: 'break-word',
+            color: '#000000',
+            fontFamily: 'monospace',
+            fontSize: '0.875rem',
+            lineHeight: '1.5'
+          }}>
+            {fullSql}
           </pre>
         </div>
       )}
