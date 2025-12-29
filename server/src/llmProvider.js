@@ -1,15 +1,18 @@
-// LLM Provider - Supports both OpenAI and Ollama
+// LLM Provider - Supports OpenAI, Ollama, and Groq
 import OpenAI from 'openai';
+import Groq from 'groq-sdk';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai'; // 'openai' or 'ollama'
+const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai'; // 'openai', 'ollama', or 'groq'
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b-instruct-q5_K_M';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
 
 let openaiClient = null;
+let groqClient = null;
 
 // Initialize OpenAI client (only if using OpenAI)
 if (LLM_PROVIDER === 'openai') {
@@ -18,6 +21,17 @@ if (LLM_PROVIDER === 'openai') {
   } else {
     openaiClient = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+}
+
+// Initialize Groq client (only if using Groq)
+if (LLM_PROVIDER === 'groq') {
+  if (!process.env.GROQ_API_KEY) {
+    console.warn('⚠️ Warning: GROQ_API_KEY not set, but LLM_PROVIDER is set to groq');
+  } else {
+    groqClient = new Groq({
+      apiKey: process.env.GROQ_API_KEY,
     });
   }
 }
@@ -129,6 +143,32 @@ async function callOpenAI(messages, options = {}) {
   };
 }
 
+// Groq API call helper
+async function callGroq(messages, options = {}) {
+  const {
+    temperature = 0.7,
+    max_tokens = 2000,
+    model = GROQ_MODEL,
+  } = options;
+
+  if (!groqClient) {
+    throw new Error('Groq client not initialized. Check GROQ_API_KEY environment variable.');
+  }
+
+  const completion = await groqClient.chat.completions.create({
+    model: model,
+    messages: messages,
+    temperature: temperature,
+    max_tokens: max_tokens,
+  });
+
+  return {
+    content: completion.choices[0].message.content,
+    model: completion.model,
+    usage: completion.usage,
+  };
+}
+
 // Universal LLM call function - switches between providers
 export async function callLLM(messages, options = {}) {
   const provider = LLM_PROVIDER.toLowerCase();
@@ -149,17 +189,32 @@ export async function callLLM(messages, options = {}) {
     }
   } else if (provider === 'openai') {
     return await callOpenAI(messages, options);
+  } else if (provider === 'groq') {
+    return await callGroq(messages, options);
   } else {
-    throw new Error(`Unknown LLM_PROVIDER: ${LLM_PROVIDER}. Use 'openai' or 'ollama'`);
+    throw new Error(`Unknown LLM_PROVIDER: ${LLM_PROVIDER}. Use 'openai', 'ollama', or 'groq'`);
   }
 }
 
 // Get current provider info
 export function getLLMProviderInfo() {
+  let model, baseUrl;
+  
+  if (LLM_PROVIDER === 'openai') {
+    model = OPENAI_MODEL;
+    baseUrl = 'https://api.openai.com';
+  } else if (LLM_PROVIDER === 'groq') {
+    model = GROQ_MODEL;
+    baseUrl = 'https://api.groq.com';
+  } else {
+    model = OLLAMA_MODEL;
+    baseUrl = OLLAMA_BASE_URL;
+  }
+  
   return {
     provider: LLM_PROVIDER,
-    model: LLM_PROVIDER === 'openai' ? OPENAI_MODEL : OLLAMA_MODEL,
-    baseUrl: LLM_PROVIDER === 'openai' ? 'https://api.openai.com' : OLLAMA_BASE_URL,
+    model: model,
+    baseUrl: baseUrl,
   };
 }
 

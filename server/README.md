@@ -25,9 +25,21 @@ DB_PASSWORD=your_password
 DB_ENCRYPT=true
 DB_TRUST_SERVER_CERTIFICATE=false
 
-# OpenAI Configuration
+# LLM Provider Configuration
+# Set LLM_PROVIDER to 'openai', 'ollama', or 'groq'
+LLM_PROVIDER=openai
+
+# OpenAI Configuration (required if LLM_PROVIDER=openai)
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_MODEL=gpt-4
+
+# Ollama Configuration (required if LLM_PROVIDER=ollama)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1:8b-instruct-q5_K_M
+
+# Groq Configuration (required if LLM_PROVIDER=groq)
+GROQ_API_KEY=your_groq_api_key_here
+GROQ_MODEL=llama-3.1-70b-versatile
 
 # Server Configuration
 PORT=4000
@@ -43,6 +55,16 @@ npm run dev
 ```
 
 The server will run on `http://localhost:4000`
+
+## Switching LLM Providers
+
+You can easily switch between different LLM providers by setting the `LLM_PROVIDER` environment variable:
+
+- **OpenAI**: Set `LLM_PROVIDER=openai` (default) and provide `OPENAI_API_KEY`
+- **Ollama**: Set `LLM_PROVIDER=ollama` and ensure Ollama is running locally
+- **Groq**: Set `LLM_PROVIDER=groq` and provide `GROQ_API_KEY`
+
+The application logic remains unchanged - just update the environment variable and the corresponding API key. All providers use the same interface, so your application code doesn't need any modifications.
 
 ## API Endpoints
 
